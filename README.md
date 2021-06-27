@@ -10,6 +10,9 @@ Spring based rest service to test http routes
 # run container
 * docker run -d --name httpclient --publish 8080:8080 --restart unless-stopped wlanboy/javahttpclient:latest
 
+# docker hub
+* https://hub.docker.com/r/wlanboy/javahttpclient
+
 # test java http client
 * curl 
 --location 
