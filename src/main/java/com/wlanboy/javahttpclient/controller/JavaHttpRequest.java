@@ -7,5 +7,5 @@ public final class JavaHttpRequest {
 	@NonNull
 	public String url;
 	@NonNull
-	public boolean copyHeaders;
+	public Boolean copyHeaders;
 }
