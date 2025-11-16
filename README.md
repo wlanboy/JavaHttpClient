@@ -14,11 +14,7 @@ Spring based rest service to test http routes
 * https://hub.docker.com/r/wlanboy/javahttpclient
 
 # test java http client
-* curl 
---location 
---request POST 'http://127.0.0.1:8080/client' \
---header 'Content-Type: application/json' \
---data-raw '{
-    "url" : "https://github.com",
-    "copyHeaders": "false"
-}'
+```bash
+curl -L -X POST 'http://127.0.0.1:8080/client' -H 'Content-Type: application/json' \
+-d '{"url" : "https://github.com", "copyHeaders": "false"}'
+```
