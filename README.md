@@ -18,3 +18,6 @@ Spring based rest service to test http routes
 curl -L -X POST 'http://127.0.0.1:8080/client' -H 'Content-Type: application/json' \
 -d '{"url" : "https://github.com", "copyHeaders": "false"}'
 ```
+
+# swagger uri
+- http://localhost:8080/swagger-ui/index.html#/http-client-controller/postMapping

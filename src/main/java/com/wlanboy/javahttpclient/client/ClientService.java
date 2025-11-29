@@ -47,7 +47,7 @@ public class ClientService {
 		try {
 			List<String> badheaders = new ArrayList<>(Arrays.asList("Host","Content-Type","Content-Length","Accept-Encoding","host","content-type","content-length", "connection","accept-encoding"));
 			List<String> headers = new ArrayList<>(Arrays.asList("test","wlanboy"));
-			if (requestData.copyHeaders) {
+			if (requestData.copyHeaders()) {
 				httpHeaders.entrySet().stream().filter( (entry) -> !badheaders.contains(entry.getKey()) ).forEach((entry) -> {
 					headers.add(entry.getKey()); 
 					headers.add(entry.getValue().get(0));
@@ -55,7 +55,7 @@ public class ClientService {
 			}
 			
 			HttpRequest request = HttpRequest.newBuilder()
-					.uri(URI.create(requestData.url))
+					.uri(URI.create(requestData.url()))
 					.headers(headers.toArray(String[]::new))
 					.GET()
 					.build();

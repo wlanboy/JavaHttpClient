@@ -2,10 +2,5 @@ package com.wlanboy.javahttpclient.controller;
 
 import org.springframework.lang.NonNull;
 
-public final class JavaHttpRequest {
+public record JavaHttpRequest(@NonNull String url, @NonNull Boolean copyHeaders) {}
 
-	@NonNull
-	public String url;
-	@NonNull
-	public Boolean copyHeaders;
-}
