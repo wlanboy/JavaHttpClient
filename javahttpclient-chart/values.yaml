@@ -5,6 +5,7 @@ image:
 
 replicaCount: 1
 deploymentname: javahttpclient
+namespace: clients
 
 service:
   name: javahttpclient-svc
