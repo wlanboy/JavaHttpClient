@@ -1,0 +1,40 @@
+image:
+  repository: wlanboy/javahttpclient
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+deploymentname: javahttpclient
+
+service:
+  name: javahttpclient-svc
+  type: ClusterIP
+  port: 8080
+  targetPort: 8001
+
+pvc:
+  enabled: true
+  name: javahttpclient-tmp-pvc
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ""
+  size: "100Mi"
+
+volume:
+  mountPath: /tmp
+
+istio:
+  gatewayName: javahttpclient-gw
+  gatewayNamespace: "istio-ingress"
+  host: javahttpclient.tp.lan
+  tls:
+    enabled: true
+    secretName: javahttpclient-tls
+
+certManager:
+  enabled: true
+  issuerRef:
+    kind: ClusterIssuer
+    name: "local-ca-issuer"
+  dnsNames:
+    - javahttpclient.tp.lan
