@@ -21,3 +21,29 @@ curl -L -X POST 'http://127.0.0.1:8080/client' -H 'Content-Type: application/jso
 
 # swagger uri
 - http://localhost:8080/swagger-ui/index.html#/http-client-controller/postMapping
+
+# curl calls for mirrorservice
+* see: https://github.com/wlanboy/MirrorService
+```bash
+curl -X 'POST' \
+  'http://localhost:8080/client' \
+  -H 'accept: */*' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "url": "http://gmk:8003/resolve/google.com",
+  "method": "GET",
+  "body": "",
+  "copyHeaders": false
+}'
+
+curl -X 'POST' \
+  'http://localhost:8080/client' \
+  -H 'accept: */*' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "url": "http://gmk:8003/mirror?request=HalloWelt&statuscode=200&wait=4",
+  "method": "GET",
+  "body": "",
+  "copyHeaders": true
+}'
+```
