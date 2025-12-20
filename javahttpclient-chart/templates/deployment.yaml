@@ -40,6 +40,6 @@ spec:
       volumes:
         - name: config-volume
           configMap:
-            name: {{ .Values.deploymentName }}-config
+            name: {{ .Values.deploymentname }}-config
         - name: tmp-volume
           emptyDir: {}
