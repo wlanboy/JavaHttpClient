@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .Values.deploymentName }}-config
+  name: {{ .Values.deploymentname }}-config
 data:
   application.properties: |
     # Endpoints
