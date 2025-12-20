@@ -20,9 +20,26 @@ spec:
           ports:
             - containerPort: {{ .Values.service.targetPort }}
           volumeMounts:
+            - name: config-volume
+              mountPath: /app/application.properties
+              subPath: application.properties
             - name: tmp-volume
-              mountPath: {{ .Values.volume.mountPath }}
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: {{ .Values.service.targetPort }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: {{ .Values.service.targetPort }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
       volumes:
+        - name: config-volume
+          configMap:
+            name: {{ .Values.deploymentName }}-config
         - name: tmp-volume
-          persistentVolumeClaim:
-            claimName: {{ .Values.pvc.name }}
+          emptyDir: {}

@@ -13,21 +13,16 @@ service:
   port: 8080
   targetPort: 8080
 
-pvc:
-  enabled: true
-  name: javahttpclient-tmp-pvc
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: ""
-  size: "100Mi"
-
 volume:
   mountPath: /tmp
+
+hosts: 
+  - javahttpclient.tp.lan
+  - javahttpclient.gmk.lan
 
 istio:
   gatewayName: javahttpclient-gw
   gatewayNamespace: "istio-ingress"
-  host: javahttpclient.tp.lan
   tls:
     enabled: true
     secretName: javahttpclient-tls
@@ -39,3 +34,4 @@ certManager:
     name: "local-ca-issuer"
   dnsNames:
     - javahttpclient.tp.lan
+    - javahttpclient.gmk.lan
