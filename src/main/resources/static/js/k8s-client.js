@@ -42,37 +42,48 @@ const K8sClient = (() => {
 
                 // --- TAB C: POD KONTEXT (Dynamisch) ---
                 const contextRows = Object.entries(context).map(([key, val]) => {
+                    let displayVal = val;
                     let badgeClass = "bg-light text-dark border";
-                    if (val === true) badgeClass = "bg-success text-white";
-                    if (val === false) badgeClass = "bg-danger text-white";
+
+                    // 1. Behandlung von Booleans (true/false)
+                    if (typeof val === 'boolean') {
+                        badgeClass = val ? "bg-success text-white" : "bg-danger text-white";
+                        displayVal = val ? "JA" : "NEIN";
+                    }
+                    // 2. Behandlung von komplexen Objekten (wie deine istioDetails)
+                    else if (typeof val === 'object' && val !== null) {
+                        // Wir zeigen in der Tabelle nur einen Hinweis, die Details sind im JSON-Button
+                        displayVal = `<i class="bi bi-diagram-3 me-1"></i> Objekt (siehe Details)`;
+                        badgeClass = "bg-info text-dark border";
+                    }
 
                     return `
-                        <tr>
-                            <td class="bg-light fw-bold small text-muted w-25">${key}</td>
-                            <td><span class="badge ${badgeClass} font-monospace">${val}</span></td>
-                        </tr>`;
+                    <tr>
+                        <td class="bg-light fw-bold small text-muted w-25">${key}</td>
+                        <td><span class="badge ${badgeClass} font-monospace">${displayVal}</span></td>
+                    </tr>`;
                 }).join('');
 
                 resourceDiv.innerHTML = `
-                    <div class="p-2">
-                        <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
-                            <h6 class="x-small fw-bold text-uppercase text-muted mb-0">Identität & Kontext</h6>
-                            <button class="btn btn-xs btn-outline-primary" onclick="this.parentElement.nextElementSibling.nextElementSibling.classList.toggle('d-none')">
-                                <i class="bi bi-eye me-1"></i> Details (JSON)
-                            </button>
-                        </div>
+                <div class="p-2">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                        <h6 class="x-small fw-bold text-uppercase text-muted mb-0">Identität & Kontext</h6>
+                        <button class="btn btn-xs btn-outline-primary" onclick="this.parentElement.nextElementSibling.nextElementSibling.classList.toggle('d-none')">
+                            <i class="bi bi-eye me-1"></i> Details (JSON)
+                        </button>
+                    </div>
 
-                        <table class="table table-sm border shadow-sm">
-                            <tbody>${contextRows}</tbody>
-                        </table>
+                    <table class="table table-sm border shadow-sm">
+                        <tbody>${contextRows}</tbody>
+                    </table>
 
-                        <div class="d-none mt-3">
-                            <label class="x-small fw-bold text-muted mb-1">RAW CONTEXT RESPONSE:</label>
-                            <pre class="x-small p-3 shadow-inner" 
-                                 style="background-color: #1e1e1e; color: #4af626; border-radius: 6px; border: 1px solid #333; overflow: auto; max-height: 400px; font-family: 'Fira Code', 'Courier New', monospace;"
-                            >${JSON.stringify(context, null, 4)}</pre>
-                        </div>
-                    </div>`;
+                    <div class="d-none mt-3">
+                        <label class="x-small fw-bold text-muted mb-1">KOMPLETTER KONTEXT (RAW):</label>
+                        <pre class="x-small p-3 shadow-inner" 
+                            style="background-color: #1e1e1e; color: #4af626; border-radius: 6px; border: 1px solid #333; overflow: auto; max-height: 500px; font-family: 'Fira Code', monospace;"
+                        >${JSON.stringify(context, null, 4)}</pre>
+                    </div>
+                </div>`;
 
             } catch (err) {
                 const msg = `<div class="alert alert-danger m-2 small">Fehler: ${err.message}</div>`;
