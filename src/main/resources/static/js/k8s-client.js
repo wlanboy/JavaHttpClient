@@ -25,15 +25,14 @@ const K8sClient = (() => {
             [configDiv, errorDiv, resourceDiv].forEach(el => { if (el) el.innerHTML = spinner; });
 
             try {
-                // 1. Daten laden
                 const [report, context] = await Promise.all([
                     apiFetch('/api/k8s/istio/full-report'),
                     K8sClient.loadContext()
                 ]);
 
-                // --- TAB A & B (Envoy Config & Errors) ---
-                // Hier bleibt deine bestehende Rendering-Logik für report.reachability und report.healthDiagnostics
-                configDiv.innerHTML = `<pre class="console x-small p-2 bg-dark text-success">${report.reachability.activeEndpoints}</pre>`;
+                // --- TAB A & B (Config & Errors) ---
+                // (Deine bestehende Logik für diese Tabs...)
+                configDiv.innerHTML = `<pre class="console x-small p-3 bg-dark text-success" style="border-radius:4px;">${report.reachability.activeEndpoints}</pre>`;
 
                 const errorEntries = Object.entries(report.healthDiagnostics.activeErrorMetrics);
                 errorDiv.innerHTML = errorEntries.length === 0 ?
@@ -42,7 +41,6 @@ const K8sClient = (() => {
 
 
                 // --- TAB C: POD KONTEXT (Dynamisch) ---
-                // Wir iterieren über alle Keys im Context-Response
                 const contextRows = Object.entries(context).map(([key, val]) => {
                     let badgeClass = "bg-light text-dark border";
                     if (val === true) badgeClass = "bg-success text-white";
@@ -69,8 +67,10 @@ const K8sClient = (() => {
                         </table>
 
                         <div class="d-none mt-3">
-                            <label class="x-small fw-bold text-muted">RAW CONTEXT RESPONSE:</label>
-                            <pre class="console x-small bg-light p-3 border">${JSON.stringify(context, null, 4)}</pre>
+                            <label class="x-small fw-bold text-muted mb-1">RAW CONTEXT RESPONSE:</label>
+                            <pre class="x-small p-3 shadow-inner" 
+                                 style="background-color: #1e1e1e; color: #4af626; border-radius: 6px; border: 1px solid #333; overflow: auto; max-height: 400px; font-family: 'Fira Code', 'Courier New', monospace;"
+                            >${JSON.stringify(context, null, 4)}</pre>
                         </div>
                     </div>`;
 
