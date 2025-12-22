@@ -1,5 +1,15 @@
 # JavaHttpClient
-Spring based rest service to test http routes
+Spring based rest service to test http routes in kubernetes.
+Showing http status, response, timing and istio envy settings.
+
+## Web ui
+![web ui](./screenshots/httpclient-webui.png)
+
+## Istio tab
+![istio tab](./screenshots/httpclient-istiotab.png)
+
+## Swagger
+![istio tab](./screenshots/httpclient-swagger.png)
 
 # build
 * mvn package
