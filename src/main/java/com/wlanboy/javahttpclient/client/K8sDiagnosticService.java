@@ -20,6 +20,8 @@ public class K8sDiagnosticService {
 
     private static final Logger logger = LoggerFactory.getLogger(K8sDiagnosticService.class);
     private static final String ENVOY_ADMIN_URL = "http://127.0.0.1:15000";
+    private static final String ISTIO_GROUP = "networking.istio.io";
+    private static final String ISTIO_VERSION = "v1alpha3";
 
     private final ApiClient apiClient;
     private final CustomObjectsApi customObjectsApi;
@@ -28,8 +30,8 @@ public class K8sDiagnosticService {
     public K8sDiagnosticService() throws IOException {
         this.apiClient = Config.defaultClient();
         this.customObjectsApi = new CustomObjectsApi(apiClient);
-        this.restTemplate = new RestTemplate(); // Für Envoy Admin API Calls
-        logger.info("K8s ApiClient und Diagnose-Service initialisiert.");
+        this.restTemplate = new RestTemplate();
+        logger.info("K8s Diagnostic Service erfolgreich initialisiert.");
     }
 
     public Map<String, Object> getContext() {
@@ -47,76 +49,56 @@ public class K8sDiagnosticService {
         return details;
     }
 
-    /**
-     * Fragt den lokalen Envoy Proxy nach netzwerkrelevanten Infos
-     */
-
     public Map<String, Object> getFullSidecarDetails() {
-        Map<String, Object> report = new LinkedHashMap<>(); // LinkedHashMap für stabile Reihenfolge im JSON
+        Map<String, Object> report = new LinkedHashMap<>();
 
         if (!checkIstioSidecar()) {
-            report.put("error", "Istio Sidecar nicht aktiv. Port 15021 reagiert nicht.");
+            report.put("error", "Istio Sidecar Proxy ist nicht aktiv (Port 15021 nicht erreichbar).");
             return report;
         }
 
         try {
-            // --- SEKTION A: KONFIGURATION & ERREICHBARKEIT ---
+            // Sektion A: Erreichbarkeit
             Map<String, Object> reachability = new HashMap<>();
 
-            // Der Config Dump zeigt, was Envoy theoretisch tun sollte
             reachability.put("envoyConfig", restTemplate.getForObject(ENVOY_ADMIN_URL + "/config_dump", Map.class));
-
-            // Der Cluster-Status zeigt, was Envoy real sieht (inkl. IP-Adressen der Pods)
             String clusters = restTemplate.getForObject(ENVOY_ADMIN_URL + "/clusters", String.class);
             reachability.put("activeEndpoints", clusters);
             reachability.put("summary", summarizeClusters(clusters));
-
+            reachability.put("envoyConfig", restTemplate.getForObject(ENVOY_ADMIN_URL + "/config_dump", Map.class));
             report.put("reachability", reachability);
 
-            // --- SEKTION B: FEHLER & ANOMALIEN ---
+            // Sektion B: Gesundheit & Fehler
             Map<String, Object> health = new HashMap<>();
-
-            // 1. Hole alle Statistiken, die auf Fehler hindeuten
             String rawStats = restTemplate.getForObject(
                     ENVOY_ADMIN_URL + "/stats?filter=.*(errors|5xx|timeout|retry|failed|reset|refused|overflow).*",
                     String.class);
-
-            // 2. Filtere nur die Statistiken, die wirklich Fehler zählen (Wert > 0)
             Map<String, String> activeErrors = parseErrorStatsOnly(rawStats);
-            health.put("activeErrorMetrics", activeErrors);
+            health.put("activeErrorMetrics", parseErrorStatsOnly(rawStats));
             health.put("errorCount", activeErrors.size());
-
             report.put("healthDiagnostics", health);
-            report.put("timestamp", new Date());
 
+            report.put("timestamp", new Date());
         } catch (Exception e) {
-            logger.error("Diagnose fehlgeschlagen", e);
-            report.put("error", "Kritischer Diagnosefehler: " + e.getMessage());
+            logger.error("Fehler beim Abruf der Envoy-Details: {}", e.getMessage());
+            report.put("error", "Envoy Admin API Fehler: " + e.getMessage());
         }
         return report;
     }
 
-    /**
-     * Filtert Statistiken: Nimmt nur Zeilen mit Werten > 0 auf,
-     * um die "Nadel im Heuhaufen" zu finden.
-     */
-    private Map<String, String> parseErrorStatsOnly(String rawStats) {
-        Map<String, String> errorMap = new TreeMap<>(); // TreeMap sortiert alphabetisch
+        private Map<String, String> parseErrorStatsOnly(String rawStats) {
+        Map<String, String> errorMap = new TreeMap<>();
         if (rawStats != null) {
             rawStats.lines()
                     .filter(line -> line.contains(":"))
                     .forEach(line -> {
                         String[] parts = line.split(":");
-                        String key = parts[0].trim();
-                        String value = parts[1].trim();
+                        String val = parts[1].trim();
                         try {
-                            // Wir nehmen nur Metriken auf, die einen Wert ungleich 0 haben
-                            if (Long.parseLong(value) > 0) {
-                                errorMap.put(key, value);
+                            if (Long.parseLong(val) > 0) {
+                                errorMap.put(parts[0].trim(), val);
                             }
-                        } catch (NumberFormatException e) {
-                            // Falls es kein Long ist (z.B. Text-Status), nehmen wir es trotzdem auf
-                            errorMap.put(key, value);
+                        } catch (Exception ignored) {
                         }
                     });
         }
@@ -148,22 +130,33 @@ public class K8sDiagnosticService {
     @SuppressWarnings("unchecked")
     public List<Object> getIstioResources(String namespace, String type) {
         try {
-            String plural = type.toLowerCase().endsWith("s") ? type.toLowerCase() : type.toLowerCase() + "s";
-            Object result = customObjectsApi.listNamespacedCustomObject(
-                    "networking.istio.io", "v1alpha3", namespace, plural).execute();
+            // Normalisierung des Typs (z.B. "gateway" -> "gateways")
+            String plural = type.toLowerCase();
+            if (!plural.endsWith("s")) {
+                plural += "s";
+            }
 
-            return (result instanceof Map) ? (List<Object>) ((Map<String, Object>) result).get("items")
-                    : Collections.emptyList();
+            // Neuer Fluent-API Stil (ab SDK v12)
+            // Wir übergeben nur die 4 erforderlichen Parameter
+            Object result = customObjectsApi
+                    .listNamespacedCustomObject(ISTIO_GROUP, ISTIO_VERSION, namespace, plural)
+                    .execute();
+
+            if (result instanceof Map) {
+                Map<String, Object> resultMap = (Map<String, Object>) result;
+                return (List<Object>) resultMap.get("items");
+            }
         } catch (Exception e) {
-            logger.error("Fehler beim Abrufen der Istio-Ressourcen ({}): {}", type, e.getMessage());
-            return Collections.singletonList(Map.of("error", e.getMessage()));
+            logger.warn("Fehler beim Laden von {} in {}: {}", type, namespace, e.getMessage());
         }
-    }
+        return Collections.emptyList();
+    }    
 
     private String summarizeClusters(String rawClusters) {
-        if (rawClusters == null)
-            return "Keine Daten";
-        return (long) rawClusters.split("\n").length + " bekannte Upstream-Endpunkte";
+        if (rawClusters == null || rawClusters.isBlank())
+            return "Keine Upstream-Daten";
+        long count = rawClusters.lines().count();
+        return count + " aktive Upstream-Cluster-Einträge";
     }
 
     private Map<String, String> parseStats(String rawStats) {
@@ -189,7 +182,7 @@ public class K8sDiagnosticService {
 
     private boolean checkIstioSidecar() {
         try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress("127.0.0.1", 15021), 150);
+            socket.connect(new InetSocketAddress("127.0.0.1", 15021), 200);
             return true;
         } catch (Exception e) {
             return false;
