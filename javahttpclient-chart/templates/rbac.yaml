@@ -1,0 +1,27 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "java-http-client.fullname" . }}-diagnostic-role
+rules:
+  # Standard Ressourcen für den Kontext
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  
+  # Istio spezifische Ressourcen für die Netzwerkanalyse
+  - apiGroups: ["networking.istio.io"]
+    resources: ["virtualservices", "destinationrules", "sidecars", "gateways"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "java-http-client.fullname" . }}-diagnostic-binding
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "java-http-client.fullname" . }}-sa
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "java-http-client.fullname" . }}-diagnostic-role
+  apiGroup: rbac.authorization.k8s.io
