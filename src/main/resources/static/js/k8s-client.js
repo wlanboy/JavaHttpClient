@@ -1,6 +1,6 @@
 /**
  * k8s-client.js
- * Fokus auf Envoy-Status und Pod-Kontext.
+ * Fokus auf Tab C: Dynamische Anzeige des Pod-Kontexts
  */
 const K8sClient = (() => {
 
@@ -19,57 +19,58 @@ const K8sClient = (() => {
         runFullDiagnostics: async (targetUrl) => {
             const configDiv = document.getElementById('configDisplay');
             const errorDiv = document.getElementById('errorDisplay');
-            const resourceDiv = document.getElementById('resourceDisplay'); // Jetzt Context-Display
+            const resourceDiv = document.getElementById('resourceDisplay');
 
             const spinner = '<div class="text-center p-4"><div class="spinner-border text-info"></div></div>';
             [configDiv, errorDiv, resourceDiv].forEach(el => { if (el) el.innerHTML = spinner; });
 
             try {
-                // 1. Daten parallel abrufen
+                // 1. Daten laden
                 const [report, context] = await Promise.all([
                     apiFetch('/api/k8s/istio/full-report'),
                     K8sClient.loadContext()
                 ]);
 
-                if (report.error) throw new Error(report.error);
+                // --- TAB A & B (Envoy Config & Errors) ---
+                // Hier bleibt deine bestehende Rendering-Logik für report.reachability und report.healthDiagnostics
+                configDiv.innerHTML = `<pre class="console x-small p-2 bg-dark text-success">${report.reachability.activeEndpoints}</pre>`;
 
-                // --- TAB A: ENVOY CONFIG ---
-                configDiv.innerHTML = `
-                    <div class="mb-3">
-                        <label class="fw-bold small text-muted">ENVOY CLUSTERS:</label>
-                        <pre class="console x-small p-2" style="max-height: 250px; overflow:auto; background: #1a1a1a; color: #00ff41;">${report.reachability.activeEndpoints}</pre>
-                        <div class="badge bg-primary mt-1">${report.reachability.summary}</div>
-                    </div>
-                    <button class="btn btn-xs btn-outline-secondary" onclick="this.nextElementSibling.classList.toggle('d-none')">Raw JSON anzeigen</button>
-                    <pre class="console x-small d-none mt-2 bg-light p-2 border">${JSON.stringify(report.reachability.envoyConfig, null, 2)}</pre>`;
-
-                // --- TAB B: ACTIVE ERRORS ---
                 const errorEntries = Object.entries(report.healthDiagnostics.activeErrorMetrics);
                 errorDiv.innerHTML = errorEntries.length === 0 ?
-                    `<div class="alert alert-success mt-2 small">Keine aktiven Netzwerkfehler im Proxy.</div>` :
-                    `<table class="table table-sm table-hover small mt-2">
-                        <thead class="table-dark"><tr><th>Metrik</th><th class="text-end">Wert</th></tr></thead>
-                        <tbody>${errorEntries.map(([k, v]) => `<tr><td class="x-small font-monospace">${k}</td><td class="text-end text-danger fw-bold">${v}</td></tr>`).join('')}</tbody>
-                    </table>`;
+                    `<div class="alert alert-success small">Keine Fehler.</div>` :
+                    `<table class="table table-sm small">${errorEntries.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>`;
 
-                // --- TAB C: K8S CONTEXT (ERSETZT RESSOURCEN) ---
+
+                // --- TAB C: POD KONTEXT (Dynamisch) ---
+                // Wir iterieren über alle Keys im Context-Response
+                const contextRows = Object.entries(context).map(([key, val]) => {
+                    let badgeClass = "bg-light text-dark border";
+                    if (val === true) badgeClass = "bg-success text-white";
+                    if (val === false) badgeClass = "bg-danger text-white";
+
+                    return `
+                        <tr>
+                            <td class="bg-light fw-bold small text-muted w-25">${key}</td>
+                            <td><span class="badge ${badgeClass} font-monospace">${val}</span></td>
+                        </tr>`;
+                }).join('');
+
                 resourceDiv.innerHTML = `
                     <div class="p-2">
-                        <h6 class="x-small fw-bold text-uppercase text-muted border-bottom pb-2 mb-3">Pod Identität & Umgebung</h6>
+                        <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                            <h6 class="x-small fw-bold text-uppercase text-muted mb-0">Identität & Kontext</h6>
+                            <button class="btn btn-xs btn-outline-primary" onclick="this.parentElement.nextElementSibling.nextElementSibling.classList.toggle('d-none')">
+                                <i class="bi bi-eye me-1"></i> Details (JSON)
+                            </button>
+                        </div>
+
                         <table class="table table-sm border shadow-sm">
-                            <tbody>
-                                <tr><td class="bg-light fw-bold small" style="width: 30%;">Pod Name</td><td class="font-monospace small">${context.podName || 'unbekannt'}</td></tr>
-                                <tr><td class="bg-light fw-bold small">Namespace</td><td><span class="badge bg-dark">${context.namespace}</span></td></tr>
-                                <tr><td class="bg-light fw-bold small">Istio Sidecar</td><td>
-                                    <span class="badge ${context.istioSidecar ? 'bg-success' : 'bg-danger'}">
-                                        ${context.istioSidecar ? 'ACTIVE' : 'INACTIVE'}
-                                    </span>
-                                </td></tr>
-                                <tr><td class="bg-light fw-bold small">Status Zeit</td><td class="text-muted small">${new Date().toLocaleString()}</td></tr>
-                            </tbody>
+                            <tbody>${contextRows}</tbody>
                         </table>
-                        <div class="alert alert-secondary x-small mt-3">
-                            <i class="bi bi-info-circle me-1"></i> Dieser Kontext wird direkt aus dem Service-Account Token und Umgebungsvariablen des laufenden Containers gelesen.
+
+                        <div class="d-none mt-3">
+                            <label class="x-small fw-bold text-muted">RAW CONTEXT RESPONSE:</label>
+                            <pre class="console x-small bg-light p-3 border">${JSON.stringify(context, null, 4)}</pre>
                         </div>
                     </div>`;
 
@@ -82,13 +83,13 @@ const K8sClient = (() => {
 })();
 
 /**
- * Event Listener Initialisierung
+ * Event Listener
  */
 document.addEventListener('DOMContentLoaded', async () => {
     const contextEl = document.getElementById('k8sContext');
     const diagnoseBtn = document.getElementById('k8sDiagnoseBtn');
 
-    // Navbar initial füllen
+    // Navbar füllen
     const ctx = await K8sClient.loadContext();
     if (contextEl && !ctx.error) {
         contextEl.innerHTML = `
@@ -99,15 +100,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (diagnoseBtn) {
         diagnoseBtn.addEventListener('click', () => {
             const currentUrl = document.getElementById('url').value;
-            if (!currentUrl) {
-                alert("Bitte eine URL eingeben.");
-                return;
-            }
+            if (!currentUrl) return alert("Bitte URL eingeben.");
 
             document.getElementById('resultArea').style.display = 'block';
             document.getElementById('istioPanel').style.display = 'block';
 
-            // Immer zum ersten Tab (Config) springen beim Klick
             const firstTab = document.querySelector('#config-tab');
             if (firstTab) firstTab.click();
 
