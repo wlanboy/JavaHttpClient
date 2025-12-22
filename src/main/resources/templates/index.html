@@ -169,11 +169,47 @@
                         <div
                             class="card-header bg-white border-0 d-flex justify-content-between align-items-center pt-3">
                             <h6 class="mb-0 text-primary fw-bold"><i class="bi bi-diagram-3-fill me-2"></i>Istio
-                                Networking Context</h6>
+                                Networking & Sidecar Diagnose</h6>
                             <button type="button" class="btn-close"
-                                onclick="this.closest('#istioPanel').style.display='none'"></button>
+                                onclick="document.getElementById('istioPanel').style.display='none'"></button>
                         </div>
-                        <div class="card-body" id="istioContent">
+                        <div class="card-body">
+                            <ul class="nav nav-tabs mb-3" id="diagTabs" role="tablist">
+                                <li class="nav-実験">
+                                    <button class="nav-link active small" id="config-tab" data-bs-toggle="tab"
+                                        data-bs-target="#tab-config" type="button">
+                                        <i class="bi bi-gear-wide-connected me-1"></i>A) Config & Erreichbarkeit
+                                    </button>
+                                </li>
+                                <li class="nav-item">
+                                    <button class="nav-link small text-danger" id="errors-tab" data-bs-toggle="tab"
+                                        data-bs-target="#tab-errors" type="button">
+                                        <i class="bi bi-exclamation-octagon me-1"></i>B) Aktive Fehler-Metriken
+                                    </button>
+                                </li>
+                                <li class="nav-item">
+                                    <button class="nav-link small" id="resources-tab" data-bs-toggle="tab"
+                                        data-bs-target="#tab-resources" type="button">
+                                        <i class="bi bi-files me-1"></i>K8s Ressourcen
+                                    </button>
+                                </li>
+                            </ul>
+
+                            <div class="tab-content" id="istioContent">
+                                <div class="tab-pane fade show active" id="tab-config" role="tabpanel">
+                                    <div id="configDisplay">
+                                        <div class="text-muted small p-3">Lade Konfigurationsdaten...</div>
+                                    </div>
+                                </div>
+                                <div class="tab-pane fade" id="tab-errors" role="tabpanel">
+                                    <div id="errorDisplay">
+                                        <div class="text-muted small p-3">Analysiere Statistiken...</div>
+                                    </div>
+                                </div>
+                                <div class="tab-pane fade" id="tab-resources" role="tabpanel">
+                                    <div id="resourceDisplay"></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
