@@ -19,8 +19,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const exportHistoryBtn = document.getElementById('exportHistoryBtn');
 
     let requestHistory = [];
+    const STORAGE_KEY = 'k8s_http_client_history';
 
     // --- INITIALISIERUNG ---
+    loadHistoryFromStorage();
     addHeaderRow('Content-Type', 'application/json');
 
     // --- EVENT LISTENER ---
@@ -36,9 +38,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     clearHistoryBtn.addEventListener('click', () => {
-        requestHistory = [];
-        renderHistory();
-        emptyHistoryMsg.style.display = 'block';
+        if (confirm("Möchtest du die gesamte Historie wirklich löschen?")) {
+            requestHistory = [];
+            saveHistoryToStorage();
+            renderHistory();
+        }
     });
 
     exportHistoryBtn.addEventListener('click', exportHistoryToJson);
@@ -136,7 +140,7 @@ document.addEventListener('DOMContentLoaded', () => {
         responseOutput.style.display = 'none';
         document.getElementById('errorSummary').innerText = lines[0];
         document.getElementById('errorDetail').innerText = lines[1] || "";
-        
+
         stacktraceArea.innerText = stack.trim();
         // Sicherstellen, dass er beim Laden des Fehlers erstmal zu ist
         stacktraceArea.style.display = 'none';
@@ -168,6 +172,9 @@ document.addEventListener('DOMContentLoaded', () => {
             payload, status, duration, responseData
         };
         requestHistory.unshift(entry);
+        if (requestHistory.length > 50) requestHistory.pop();
+
+        saveHistoryToStorage();
         renderHistory();
     }
 
@@ -199,7 +206,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         resultArea.style.display = 'block';
         updateResponseMetadata(entry.status, entry.duration);
-        
+
         const istioPanel = document.getElementById('istioPanel');
         if (istioPanel) istioPanel.style.display = 'none';
 
@@ -219,5 +226,28 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.appendChild(downloadAnchor);
         downloadAnchor.click();
         downloadAnchor.remove();
+    }
+
+    // --- NEUE STORAGE FUNKTIONEN ---
+
+    function saveHistoryToStorage() {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(requestHistory));
+        } catch (e) {
+            console.error("Fehler beim Speichern im LocalStorage", e);
+        }
+    }
+
+    function loadHistoryFromStorage() {
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                requestHistory = JSON.parse(saved);
+                renderHistory();
+            }
+        } catch (e) {
+            console.error("Fehler beim Laden aus LocalStorage", e);
+            requestHistory = [];
+        }
     }
 });
