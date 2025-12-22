@@ -1,7 +1,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "java-http-client.fullname" . }}-diagnostic-role
+  name: {{ .Values.deploymentname }}-diagnostic-role
 rules:
   # Standard Ressourcen für den Kontext
   - apiGroups: [""]
@@ -16,12 +16,12 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "java-http-client.fullname" . }}-diagnostic-binding
+  name: {{ .Values.deploymentname }}-diagnostic-binding
 subjects:
   - kind: ServiceAccount
-    name: {{ include "java-http-client.fullname" . }}-sa
+    name: {{ .Values.deploymentname }}-sa
     namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
-  name: {{ include "java-http-client.fullname" . }}-diagnostic-role
+  name: {{ .Values.deploymentname }}-diagnostic-role
   apiGroup: rbac.authorization.k8s.io

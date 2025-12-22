@@ -11,17 +11,14 @@ spec:
     metadata:
       labels:
         app: {{ .Values.deploymentname }}
-        # Aktiviert die automatische Istio-Sidecar Injection
         sidecar.istio.io/inject: "true"
     spec:
-      # Hier wird der neue ServiceAccount zugewiesen
-      serviceAccountName: {{ include "mychart.fullname" . }}-sa
+      serviceAccountName: {{ .Values.deploymentname }}-sa
       containers:
         - name: {{ .Values.deploymentname }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
-            # Hilfreich für den K8sDiagnosticService, falls das File-Reading fehlschlägt
             - name: KUBERNETES_NAMESPACE
               valueFrom:
                 fieldRef:
