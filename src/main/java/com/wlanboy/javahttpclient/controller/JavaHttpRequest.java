@@ -1,5 +1,7 @@
 package com.wlanboy.javahttpclient.controller;
 
+import java.util.Map;
+
 import org.springframework.http.HttpMethod;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -14,6 +16,9 @@ public record JavaHttpRequest(
     String body,
     
     @Schema(description = "Header kopieren")
-    boolean copyHeaders
+    boolean copyHeaders,
+
+    @Schema(description = "Header hinzufuegen")
+    Map<String, String> customHeaders
 ) {}
 
