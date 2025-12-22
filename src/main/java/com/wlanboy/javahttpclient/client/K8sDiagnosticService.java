@@ -86,7 +86,7 @@ public class K8sDiagnosticService {
         return report;
     }
 
-        private Map<String, String> parseErrorStatsOnly(String rawStats) {
+    private Map<String, String> parseErrorStatsOnly(String rawStats) {
         Map<String, String> errorMap = new TreeMap<>();
         if (rawStats != null) {
             rawStats.lines()
@@ -127,30 +127,29 @@ public class K8sDiagnosticService {
         return envoy;
     }
 
+    // K8sDiagnosticService.java
     @SuppressWarnings("unchecked")
     public List<Object> getIstioResources(String namespace, String type) {
         try {
-            // Normalisierung des Typs (z.B. "gateway" -> "gateways")
-            String plural = type.toLowerCase();
-            if (!plural.endsWith("s")) {
-                plural += "s";
-            }
+            String plural = type.toLowerCase().endsWith("s") ? type.toLowerCase() : type.toLowerCase() + "s";
 
-            // Neuer Fluent-API Stil (ab SDK v12)
-            // Wir übergeben nur die 4 erforderlichen Parameter
+            // Logge den Namespace für das Debugging
+            logger.info("Abfrage Istio API: Group={}, Namespace={}, Plural={}", ISTIO_GROUP, namespace, plural);
+
             Object result = customObjectsApi
                     .listNamespacedCustomObject(ISTIO_GROUP, ISTIO_VERSION, namespace, plural)
                     .execute();
 
             if (result instanceof Map) {
-                Map<String, Object> resultMap = (Map<String, Object>) result;
-                return (List<Object>) resultMap.get("items");
+                List<Object> items = (List<Object>) ((Map<String, Object>) result).get("items");
+                logger.info("API Erfolg: {} Ressourcen gefunden.", items.size());
+                return items;
             }
         } catch (Exception e) {
-            logger.warn("Fehler beim Laden von {} in {}: {}", type, namespace, e.getMessage());
+            logger.error("Kritischer Fehler beim API-Call ({}): {}", type, e.getMessage());
         }
         return Collections.emptyList();
-    }    
+    }
 
     private String summarizeClusters(String rawClusters) {
         if (rawClusters == null || rawClusters.isBlank())
