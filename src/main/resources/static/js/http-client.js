@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusBadge = document.getElementById('statusBadge');
     const responseTimeText = document.getElementById('responseTime');
     const stacktraceArea = document.getElementById('stacktraceArea');
+    const toggleStackBtn = document.getElementById('toggleStackBtn');
 
     // Historie Elemente
     const historyList = document.getElementById('historyList');
@@ -24,10 +25,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- EVENT LISTENER ---
     addHeaderBtn.addEventListener('click', () => addHeaderRow());
-    
-    document.getElementById('toggleStackBtn').addEventListener('click', () => {
-        stacktraceArea.style.display = stacktraceArea.style.display === 'none' ? 'block' : 'none';
-    });
+
+    // KORREKTUR: Robuster Toggle-Mechanismus
+    if (toggleStackBtn) {
+        toggleStackBtn.addEventListener('click', () => {
+            const isHidden = stacktraceArea.style.display === 'none' || stacktraceArea.style.display === '';
+            stacktraceArea.style.display = isHidden ? 'block' : 'none';
+            toggleStackBtn.textContent = isHidden ? 'Stacktrace ausblenden' : 'Stacktrace Details';
+        });
+    }
 
     clearHistoryBtn.addEventListener('click', () => {
         requestHistory = [];
@@ -65,7 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const duration = Date.now() - startTime;
             const data = await response.text();
-            
+
             updateResponseMetadata(response.status, duration);
             addToHistory(payload, response.status, duration, data);
 
@@ -114,6 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
         responseOutput.style.display = 'block';
         responseOutput.innerText = "Sende Request an Cluster...";
         stacktraceArea.style.display = 'none';
+        if (toggleStackBtn) toggleStackBtn.textContent = 'Stacktrace Details';
     }
 
     function updateResponseMetadata(status, duration) {
@@ -129,7 +136,10 @@ document.addEventListener('DOMContentLoaded', () => {
         responseOutput.style.display = 'none';
         document.getElementById('errorSummary').innerText = lines[0];
         document.getElementById('errorDetail').innerText = lines[1] || "";
+        
         stacktraceArea.innerText = stack.trim();
+        // Sicherstellen, dass er beim Laden des Fehlers erstmal zu ist
+        stacktraceArea.style.display = 'none';
     }
 
     function handleSuccess(data) {
@@ -183,12 +193,16 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('method').value = entry.payload.method;
         document.getElementById('body').value = entry.payload.body;
         document.getElementById('copyHeaders').checked = entry.payload.copyHeaders;
-        
+
         headerContainer.innerHTML = '';
         Object.entries(entry.payload.customHeaders).forEach(([k, v]) => addHeaderRow(k, v));
 
         resultArea.style.display = 'block';
         updateResponseMetadata(entry.status, entry.duration);
+        
+        const istioPanel = document.getElementById('istioPanel');
+        if (istioPanel) istioPanel.style.display = 'none';
+
         if (entry.status === 502 && entry.responseData.includes("---STACKTRACE---")) {
             handleDetailedError(entry.responseData);
         } else {
