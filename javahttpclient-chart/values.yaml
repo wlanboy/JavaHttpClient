@@ -1,7 +1,7 @@
 image:
   repository: wlanboy/javahttpclient
   tag: latest
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 replicaCount: 1
 deploymentname: javahttpclient
