@@ -1,7 +1,3 @@
-/**
- * k8s-client.js
- * Umfassende Diagnose für Envoy-Sidecars und Istio-Netzwerkressourcen.
- */
 const K8sClient = (() => {
 
     async function apiFetch(endpoint) {
@@ -10,9 +6,7 @@ const K8sClient = (() => {
         return await response.json();
     }
 
-    /**
-     * Hilfsfunktion zum Rendern einer Ressourcen-Gruppe (VS, DR, oder GW)
-     */
+    // Zeigt einfach alle Items an, die übergeben werden
     function renderResourceGroup(title, items, icon, colorClass) {
         return `
             <div class="mb-3">
@@ -43,14 +37,22 @@ const K8sClient = (() => {
             const resourceDiv = document.getElementById('resourceDisplay');
 
             const spinner = '<div class="text-center p-4"><div class="spinner-border text-info"></div></div>';
-            [configDiv, errorDiv, resourceDiv].forEach(el => { if(el) el.innerHTML = spinner; });
+            [configDiv, errorDiv, resourceDiv].forEach(el => { if (el) el.innerHTML = spinner; });
 
             try {
+                // Namespace-Logik: Wir nutzen primär den Namespace, in dem die App selbst läuft,
+                // außer die URL ist voll qualifiziert (z.B. service.other-ns.svc).
                 const urlObj = new URL(targetUrl);
                 const hostParts = urlObj.hostname.split('.');
-                const targetNamespace = (hostParts.length > 1 && hostParts[1] !== 'svc') ? hostParts[1] : 'default';
 
-                // 1. Alle Daten parallel abrufen
+                // Wir holen uns erst den eigenen Namespace der App aus dem Context
+                const context = await apiFetch('/api/k8s/context');
+                const currentNs = context.namespace || 'default';
+
+                // Wenn die URL einen Namespace enthält (part[1]), nutze diesen, sonst den aktuellen.
+                const targetNamespace = (hostParts.length > 1 && hostParts[1] !== 'svc' && hostParts[1] !== 'cluster')
+                    ? hostParts[1] : currentNs;
+
                 const [report, vs, dr, gw] = await Promise.all([
                     apiFetch('/api/k8s/istio/full-report'),
                     apiFetch(`/api/k8s/istio/virtualservice?namespace=${targetNamespace}`),
@@ -58,46 +60,33 @@ const K8sClient = (() => {
                     apiFetch(`/api/k8s/istio/gateway?namespace=${targetNamespace}`)
                 ]);
 
-                if (report.error) throw new Error(report.error);
-
-                // --- TAB A: ENVOY CONFIG ---
+                // Render Sektionen
                 configDiv.innerHTML = `
                     <div class="mb-3">
-                        <label class="fw-bold small text-muted">AKTIVE CLUSTER (UPSTREAM):</label>
-                        <pre class="console x-small" style="max-height: 250px; overflow:auto; background: #1a1a1a; color: #00ff41; padding: 12px; border: 1px solid #333;">${report.reachability.activeEndpoints}</pre>
-                        <div class="badge bg-primary mt-1">${report.reachability.summary}</div>
+                        <label class="fw-bold small text-muted">ENVOY CLUSTERS:</label>
+                        <pre class="console x-small" style="max-height: 250px; overflow:auto; background: #1a1a1a; color: #00ff41; padding: 12px;">${report.reachability.activeEndpoints}</pre>
                     </div>
-                    <button class="btn btn-xs btn-outline-secondary" onclick="this.nextElementSibling.classList.toggle('d-none')">Raw JSON Config</button>
-                    <pre class="console x-small d-none mt-2" style="max-height:300px; overflow:auto;">${JSON.stringify(report.reachability.envoyConfig, null, 2)}</pre>`;
+                    <button class="btn btn-xs btn-outline-secondary" onclick="this.nextElementSibling.classList.toggle('d-none')">Raw JSON</button>
+                    <pre class="console x-small d-none mt-2">${JSON.stringify(report.reachability.envoyConfig, null, 2)}</pre>`;
 
-                // --- TAB B: FEHLER ---
                 const errorEntries = Object.entries(report.healthDiagnostics.activeErrorMetrics);
-                if (errorEntries.length === 0) {
-                    errorDiv.innerHTML = `<div class="alert alert-success mt-2 small"><i class="bi bi-check-circle me-2"></i>Keine aktiven Fehlermetriken im Sidecar.</div>`;
-                } else {
-                    errorDiv.innerHTML = `
-                        <table class="table table-sm table-hover border small mt-2">
-                            <thead class="table-dark"><tr><th>Envoy Metrik</th><th class="text-end">Wert</th></tr></thead>
-                            <tbody>
-                                ${errorEntries.map(([k, v]) => `<tr><td class="x-small font-monospace">${k}</td><td class="text-end text-danger fw-bold">${v}</td></tr>`).join('')}
-                            </tbody>
-                        </table>`;
-                }
+                errorDiv.innerHTML = errorEntries.length === 0 ?
+                    `<div class="alert alert-success mt-2 small">Keine Fehler-Metriken > 0.</div>` :
+                    `<table class="table table-sm table-hover small mt-2">
+                        <thead class="table-dark"><tr><th>Metrik</th><th class="text-end">Wert</th></tr></thead>
+                        <tbody>${errorEntries.map(([k, v]) => `<tr><td class="x-small">${k}</td><td class="text-end fw-bold text-danger">${v}</td></tr>`).join('')}</tbody>
+                    </table>`;
 
-                // --- TAB C: ALLE K8S/ISTIO RESSOURCEN ---
-                // Filtern auf Relevanz zum Hostname
-                const filterHost = (list) => list.filter(item => JSON.stringify(item).toLowerCase().includes(hostParts[0].toLowerCase()));
-                
+                // Ressourcen ohne Filter anzeigen
                 resourceDiv.innerHTML = `
-                    <div class="p-1">
-                        ${renderResourceGroup("Virtual Services", filterHost(vs), "bi-shuffle", "border-primary")}
-                        ${renderResourceGroup("Destination Rules", filterHost(dr), "bi-shield-shaded", "border-success")}
-                        ${renderResourceGroup("Gateways", gw, "bi-door-open", "border-warning")}
-                    </div>`;
+                    <div class="alert alert-info py-1 px-2 x-small mb-3">Zeige Ressourcen im Namespace: <strong>${targetNamespace}</strong></div>
+                    ${renderResourceGroup("Virtual Services", vs, "bi-shuffle", "border-primary")}
+                    ${renderResourceGroup("Destination Rules", dr, "bi-shield-shaded", "border-success")}
+                    ${renderResourceGroup("Gateways", gw, "bi-door-open", "border-warning")}`;
 
             } catch (err) {
-                const msg = `<div class="alert alert-danger m-2 small">Diagnose fehlgeschlagen: ${err.message}</div>`;
-                [configDiv, errorDiv, resourceDiv].forEach(el => { if(el) el.innerHTML = msg; });
+                const msg = `<div class="alert alert-danger m-2 small">Fehler: ${err.message}</div>`;
+                [configDiv, errorDiv, resourceDiv].forEach(el => { if (el) el.innerHTML = msg; });
             }
         }
     };
@@ -119,15 +108,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (diagnoseBtn) {
         diagnoseBtn.addEventListener('click', () => {
-            const urlVal = document.getElementById('url').value;
-            if (!urlVal) return alert("Bitte URL eingeben");
 
             document.getElementById('resultArea').style.display = 'block';
             document.getElementById('istioPanel').style.display = 'block';
 
-            // Sicherer Tab-Wechsel ohne 'bootstrap is not defined' Risiko
             const firstTab = document.querySelector('#config-tab');
-            if (firstTab) firstTab.click(); 
+            if (firstTab) firstTab.click();
 
             K8sClient.runFullDiagnostics(urlVal);
         });
