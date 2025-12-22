@@ -3,7 +3,7 @@
  * Zuständig für Kubernetes Kontext-Informationen und Istio-Netzwerkdiagnose.
  */
 const K8sClient = (() => {
-    
+
     // Private Hilfsfunktion für API-Anfragen an den DiagnosticController
     async function apiFetch(endpoint) {
         const response = await fetch(endpoint);
@@ -78,13 +78,13 @@ const K8sClient = (() => {
                     <div class="spinner-border text-info" role="status"></div>
                     <div class="mt-2">Analysiere Routing-Regeln im Cluster...</div>
                 </div>`;
-            
+
             try {
                 // Namespace aus URL extrahieren (Erwartet Format: http://service.namespace.svc...)
                 const urlObj = new URL(targetUrl);
                 const host = urlObj.hostname;
                 const parts = host.split('.');
-                
+
                 // Logik: service.namespace.svc -> namespace ist an Index 1
                 // Bei "localhost" oder einfachen Namen nehmen wir "default"
                 const namespace = (parts.length > 1 && parts[1] !== 'svc') ? parts[1] : 'default';
@@ -139,10 +139,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         diagnoseBtn.addEventListener('click', () => {
             const urlInput = document.getElementById('url').value;
             if (!urlInput) {
-                alert("Bitte geben Sie erst eine Ziel-URL ein.");
+                alert("Bitte geben Sie erst eine Ziel-URL ein, die analysiert werden soll.");
                 return;
             }
+
+            // WICHTIG: Die ResultArea und das Panel sichtbar machen
+            const resultArea = document.getElementById('resultArea');
+            const istioPanel = document.getElementById('istioPanel');
+
+            if (resultArea) resultArea.style.display = 'block';
             if (istioPanel) istioPanel.style.display = 'block';
+
             K8sClient.runFullDiagnostics(urlInput);
         });
     }
