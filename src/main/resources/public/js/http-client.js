@@ -181,18 +181,46 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderHistory() {
         emptyHistoryMsg.style.display = requestHistory.length ? 'none' : 'block';
         historyList.innerHTML = '';
-        requestHistory.forEach(entry => {
+
+        requestHistory.forEach((entry) => {
             const isErr = entry.status >= 400 || entry.status === 0;
-            const item = document.createElement('button');
-            item.className = `list-group-item list-group-item-action border-start border-4 ${isErr ? 'border-danger' : 'border-success'}`;
+            const item = document.createElement('div');
+            item.className = `list-group-item list-group-item-action border-start border-4 ${isErr ? 'border-danger' : 'border-success'} d-flex align-items-center p-0`;
+
             item.innerHTML = `
-                <div class="d-flex justify-content-between"><strong>${entry.payload.method}</strong><small>${entry.time}</small></div>
-                <div class="text-truncate small">${entry.payload.url}</div>
-                <div class="mt-1"><span class="badge ${isErr ? 'bg-danger' : 'bg-success'}">${entry.status}</span> <small>${entry.duration}ms</small></div>
-            `;
-            item.onclick = () => restoreEntry(entry);
+            <div class="flex-grow-1 p-2 cursor-pointer">
+                <div class="d-flex justify-content-between">
+                    <strong class="small">${entry.payload.method}</strong>
+                    <small class="text-muted" style="font-size: 0.7rem;">${entry.time}</small>
+                </div>
+                <div class="text-truncate x-small text-muted" style="max-width: 180px;">${entry.payload.url}</div>
+                <div class="mt-1">
+                    <span class="badge ${isErr ? 'bg-danger' : 'bg-success'}" style="font-size: 0.65rem;">${entry.status}</span> 
+                    <small class="x-small">${entry.duration}ms</small>
+                </div>
+            </div>
+            <button class="btn btn-sm text-danger opacity-50 px-2 delete-history-item" title="Löschen">
+                <i class="bi bi-trash"></i>✕
+            </button>
+        `;
+
+            item.querySelector('.flex-grow-1').onclick = () => restoreEntry(entry);
+
+            item.querySelector('.delete-history-item').onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                deleteSingleHistoryItem(entry.id);
+            };
+
             historyList.appendChild(item);
         });
+    }
+
+    function deleteSingleHistoryItem(entryId) {
+        requestHistory = requestHistory.filter(item => item.id !== entryId);
+
+        saveHistoryToStorage();
+        renderHistory();
     }
 
     function restoreEntry(entry) {
@@ -227,8 +255,6 @@ document.addEventListener('DOMContentLoaded', () => {
         downloadAnchor.click();
         downloadAnchor.remove();
     }
-
-    // --- NEUE STORAGE FUNKTIONEN ---
 
     function saveHistoryToStorage() {
         try {
