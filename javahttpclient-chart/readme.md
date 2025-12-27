@@ -1,3 +1,6 @@
+## Helm chart usage
+How to install the java based http client via helm.
+
 ```bash
 helm install httpclient . -n clients --create-namespace
 ```
