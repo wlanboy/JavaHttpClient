@@ -1,8 +1,5 @@
 name: Docker build and publish multiarch image
 on: 
-  push:
-    tags: 
-      - '*d'
   workflow_dispatch:
 
 jobs:
