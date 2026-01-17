@@ -10,8 +10,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.time.Duration;
-import java.util.Arrays;
-import java.util.List;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +25,9 @@ import com.wlanboy.javahttpclient.controller.JavaHttpRequest;
 @Service
 public class ClientService {
 	private static final Logger logger = LoggerFactory.getLogger(ClientService.class);
+	private static final Set<String> BAD_HEADERS = Set.of(
+			"host", "content-length", "connection", "accept-encoding", "upgrade"
+	);
 	private final HttpClient client;
 
 	public ClientService() {
@@ -38,9 +40,6 @@ public class ClientService {
 
 	public ResponseEntity<String> sendRequest(JavaHttpRequest requestData, HttpHeaders incomingHeaders) {
 		try {
-			List<String> badHeaders = Arrays.asList("host", "content-length", "connection", "accept-encoding",
-					"upgrade");
-
 			HttpRequest.BodyPublisher bodyPublisher = (requestData.body() == null || requestData.body().isBlank())
 					? HttpRequest.BodyPublishers.noBody()
 					: HttpRequest.BodyPublishers.ofString(requestData.body());
@@ -55,7 +54,7 @@ public class ClientService {
 
 			if (requestData.copyHeaders() && incomingHeaders != null) {
 				incomingHeaders.forEach((key, value) -> {
-					if (!badHeaders.contains(key.toLowerCase()) && !value.isEmpty()) {
+					if (!BAD_HEADERS.contains(key.toLowerCase()) && !value.isEmpty()) {
 						try {
 							builder.header(key, value.get(0));
 						} catch (IllegalArgumentException e) {
@@ -67,7 +66,7 @@ public class ClientService {
 
 			if (requestData.customHeaders() != null) {
 				requestData.customHeaders().forEach((key, value) -> {
-					if (key != null && !key.isBlank() && !badHeaders.contains(key.toLowerCase())) {
+					if (key != null && !key.isBlank() && !BAD_HEADERS.contains(key.toLowerCase())) {
 						builder.header(key, value);
 					}
 				});
