@@ -1,7 +1,6 @@
 package com.wlanboy.javahttpclient.controller;
 
 import com.wlanboy.javahttpclient.client.K8sDiagnosticService;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,8 +11,11 @@ import java.util.Map;
 @RequestMapping("/api/k8s")
 public class DiagnosticController {
 
-    @Autowired
-    private K8sDiagnosticService k8sService;
+    private final K8sDiagnosticService k8sService;
+
+    public DiagnosticController(K8sDiagnosticService k8sService) {
+        this.k8sService = k8sService;
+    }
 
     /**
      * Liefert den allgemeinen K8s Kontext (Namespace, Pod, Sidecar Status).
