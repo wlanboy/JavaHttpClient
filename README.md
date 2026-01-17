@@ -32,7 +32,7 @@ curl -L -X POST 'http://127.0.0.1:8080/client' -H 'Content-Type: application/jso
 ```bash
 curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash
 
-mirrord exec -n javahttpclient --target deployment/javahttpclient -- ./mvnw spring-boot:run
+mirrord exec -n javahttpclient --target deployment/javahttpclient -- mvn spring-boot:run
 ```
 
 # swagger uri
