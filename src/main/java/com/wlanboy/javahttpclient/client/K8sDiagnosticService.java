@@ -23,15 +23,30 @@ public class K8sDiagnosticService {
     private static final String ISTIO_GROUP = "networking.istio.io";
     private static final String ISTIO_VERSION = "v1alpha3";
 
-    private final ApiClient apiClient;
-    private final CustomObjectsApi customObjectsApi;
+    private volatile ApiClient apiClient;
+    private volatile CustomObjectsApi customObjectsApi;
     private final RestTemplate restTemplate;
+    private volatile boolean k8sInitialized = false;
+    private volatile String k8sInitError = null;
 
-    public K8sDiagnosticService() throws IOException {
-        this.apiClient = Config.defaultClient();
-        this.customObjectsApi = new CustomObjectsApi(apiClient);
+    public K8sDiagnosticService() {
         this.restTemplate = new RestTemplate();
-        logger.info("K8s Diagnostic Service erfolgreich initialisiert.");
+        initializeK8sClient();
+        logger.info("K8s Diagnostic Service initialisiert (K8s API verfügbar: {}).", k8sInitialized);
+    }
+
+    private synchronized void initializeK8sClient() {
+        if (k8sInitialized) {
+            return;
+        }
+        try {
+            this.apiClient = Config.defaultClient();
+            this.customObjectsApi = new CustomObjectsApi(apiClient);
+            this.k8sInitialized = true;
+        } catch (IOException e) {
+            logger.warn("K8s API Client konnte nicht initialisiert werden: {}. Istio-Ressourcen nicht verfügbar.", e.getMessage());
+            this.k8sInitError = e.getMessage();
+        }
     }
 
     public Map<String, Object> getContext() {
@@ -65,7 +80,6 @@ public class K8sDiagnosticService {
             String clusters = restTemplate.getForObject(ENVOY_ADMIN_URL + "/clusters", String.class);
             reachability.put("activeEndpoints", clusters);
             reachability.put("summary", summarizeClusters(clusters));
-            reachability.put("envoyConfig", restTemplate.getForObject(ENVOY_ADMIN_URL + "/config_dump", Map.class));
             report.put("reachability", reachability);
 
             // Sektion B: Gesundheit & Fehler
@@ -92,13 +106,16 @@ public class K8sDiagnosticService {
             rawStats.lines()
                     .filter(line -> line.contains(":"))
                     .forEach(line -> {
-                        String[] parts = line.split(":");
-                        String val = parts[1].trim();
-                        try {
-                            if (Long.parseLong(val) > 0) {
-                                errorMap.put(parts[0].trim(), val);
+                        int colonIndex = line.lastIndexOf(':');
+                        if (colonIndex > 0 && colonIndex < line.length() - 1) {
+                            String key = line.substring(0, colonIndex).trim();
+                            String val = line.substring(colonIndex + 1).trim();
+                            try {
+                                if (Long.parseLong(val) > 0) {
+                                    errorMap.put(key, val);
+                                }
+                            } catch (NumberFormatException ignored) {
                             }
-                        } catch (Exception ignored) {
                         }
                     });
         }
@@ -127,13 +144,16 @@ public class K8sDiagnosticService {
         return envoy;
     }
 
-    // K8sDiagnosticService.java
     @SuppressWarnings("unchecked")
     public List<Object> getIstioResources(String namespace, String type) {
+        if (!k8sInitialized) {
+            logger.warn("K8s API nicht verfügbar: {}", k8sInitError);
+            return Collections.emptyList();
+        }
+
         try {
             String plural = type.toLowerCase().endsWith("s") ? type.toLowerCase() : type.toLowerCase() + "s";
 
-            // Logge den Namespace für das Debugging
             logger.info("Abfrage Istio API: Group={}, Namespace={}, Plural={}", ISTIO_GROUP, namespace, plural);
 
             Object result = customObjectsApi
@@ -164,8 +184,11 @@ public class K8sDiagnosticService {
             rawStats.lines()
                     .filter(line -> line.contains(":"))
                     .forEach(line -> {
-                        String[] parts = line.split(":");
-                        statsMap.put(parts[0].trim(), parts[1].trim());
+                        int colonIndex = line.lastIndexOf(':');
+                        if (colonIndex > 0 && colonIndex < line.length() - 1) {
+                            statsMap.put(line.substring(0, colonIndex).trim(),
+                                        line.substring(colonIndex + 1).trim());
+                        }
                     });
         }
         return statsMap;
