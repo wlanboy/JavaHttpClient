@@ -15,10 +15,10 @@ Showing http status, response, timing and istio envy settings.
 * mvn package
 
 # docker build
-* docker build -t wlanboy/javahttpclient:latest . --build-arg JAR_FILE=./target/javahttpclient-0.0.1-SNAPSHOT.jar
+* docker build -t wlanboy/javahttpclient:latest . 
 
 # run container
-* docker run -d --name httpclient --publish 8080:8080 --restart unless-stopped wlanboy/javahttpclient:latest
+* docker run --rm --name httpclient --publish 8080:8080 wlanboy/javahttpclient:latest
 
 # docker hub
 * https://hub.docker.com/r/wlanboy/javahttpclient

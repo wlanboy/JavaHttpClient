@@ -20,6 +20,7 @@ set -e
 
 exec java \
   -Djava.security.egd=file:/dev/./urandom \
+  -Dspring.aot.enabled=true \
   -XX:MaxRAMPercentage=50 \
   -XX:InitialRAMPercentage=30 \
   -XX:+UseG1GC \
