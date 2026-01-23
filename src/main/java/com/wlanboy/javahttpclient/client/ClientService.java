@@ -17,8 +17,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.util.CollectionUtils;
-import org.springframework.util.MultiValueMap;
 
 import com.wlanboy.javahttpclient.controller.JavaHttpRequest;
 
@@ -40,15 +38,20 @@ public class ClientService {
 
 	public ResponseEntity<String> sendRequest(JavaHttpRequest requestData, HttpHeaders incomingHeaders) {
 		try {
-			HttpRequest.BodyPublisher bodyPublisher = (requestData.body() == null || requestData.body().isBlank())
-					? HttpRequest.BodyPublishers.noBody()
-					: HttpRequest.BodyPublishers.ofString(requestData.body());
+			boolean hasBody = requestData.body() != null && !requestData.body().isBlank();
+
+			HttpRequest.BodyPublisher bodyPublisher = hasBody
+					? HttpRequest.BodyPublishers.ofString(requestData.body())
+					: HttpRequest.BodyPublishers.noBody();
 
 			HttpRequest.Builder builder = HttpRequest.newBuilder()
 					.uri(URI.create(requestData.url()))
+					.timeout(Duration.ofSeconds(30))
 					.method(requestData.method().name(), bodyPublisher);
 
-			if (requestData.body() != null && !requestData.body().isBlank()) {
+			if (hasBody && requestData.contentType() != null && !requestData.contentType().isBlank()) {
+				builder.header("Content-Type", requestData.contentType());
+			} else if (hasBody) {
 				builder.header("Content-Type", "application/json");
 			}
 
@@ -74,9 +77,12 @@ public class ClientService {
 
 			HttpResponse<String> response = client.send(builder.build(), BodyHandlers.ofString());
 
-			MultiValueMap<String, String> responseHeaders = CollectionUtils.toMultiValueMap(response.headers().map());
+			HttpHeaders responseHeaders = new HttpHeaders();
+			response.headers().map().forEach(responseHeaders::addAll);
 
-			return new ResponseEntity<>(response.body(), responseHeaders, response.statusCode());
+			return ResponseEntity.status(response.statusCode())
+					.headers(h -> h.addAll(responseHeaders))
+					.body(response.body());
 
 		} catch (Exception e) {
 			String errorDetail = formatErrorResponse(e);

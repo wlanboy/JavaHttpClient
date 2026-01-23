@@ -19,8 +19,11 @@ public record JavaHttpRequest(
     @NotNull(message = "HTTP Methode ist erforderlich")
     HttpMethod method,
 
-    @Schema(description = "Optionaler JSON Body", example = "{\"key\": \"value\"}")
+    @Schema(description = "Optionaler Request Body", example = "{\"key\": \"value\"}")
     String body,
+
+    @Schema(description = "Content-Type des Bodys", example = "application/json")
+    String contentType,
 
     @Schema(description = "Header kopieren")
     boolean copyHeaders,

@@ -13,7 +13,10 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.*;
+
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 
 @Service
 public class K8sDiagnosticService {
@@ -30,7 +33,10 @@ public class K8sDiagnosticService {
     private volatile String k8sInitError = null;
 
     public K8sDiagnosticService() {
-        this.restTemplate = new RestTemplate();
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofSeconds(5));
+        factory.setReadTimeout(Duration.ofSeconds(10));
+        this.restTemplate = new RestTemplate(factory);
         initializeK8sClient();
         logger.info("K8s Diagnostic Service initialisiert (K8s API verfügbar: {}).", k8sInitialized);
     }
@@ -87,8 +93,8 @@ public class K8sDiagnosticService {
             String rawStats = restTemplate.getForObject(
                     ENVOY_ADMIN_URL + "/stats?filter=.*(errors|5xx|timeout|retry|failed|reset|refused|overflow).*",
                     String.class);
-            Map<String, String> activeErrors = parseErrorStatsOnly(rawStats);
-            health.put("activeErrorMetrics", parseErrorStatsOnly(rawStats));
+            Map<String, String> activeErrors = parseStats(rawStats, true);
+            health.put("activeErrorMetrics", activeErrors);
             health.put("errorCount", activeErrors.size());
             report.put("healthDiagnostics", health);
 
@@ -100,27 +106,6 @@ public class K8sDiagnosticService {
         return report;
     }
 
-    private Map<String, String> parseErrorStatsOnly(String rawStats) {
-        Map<String, String> errorMap = new TreeMap<>();
-        if (rawStats != null) {
-            rawStats.lines()
-                    .filter(line -> line.contains(":"))
-                    .forEach(line -> {
-                        int colonIndex = line.lastIndexOf(':');
-                        if (colonIndex > 0 && colonIndex < line.length() - 1) {
-                            String key = line.substring(0, colonIndex).trim();
-                            String val = line.substring(colonIndex + 1).trim();
-                            try {
-                                if (Long.parseLong(val) > 0) {
-                                    errorMap.put(key, val);
-                                }
-                            } catch (NumberFormatException ignored) {
-                            }
-                        }
-                    });
-        }
-        return errorMap;
-    }
 
     private Map<String, Object> getEnvoyDetails() {
         Map<String, Object> envoy = new HashMap<>();
@@ -136,7 +121,7 @@ public class K8sDiagnosticService {
             // Wichtige Netzwerk-Stats (Retries, Timeouts, 5xx Fehler)
             String stats = restTemplate.getForObject(
                     ENVOY_ADMIN_URL + "/stats?filter=cluster.*.upstream_rq_(5xx|timeout|retry)", String.class);
-            envoy.put("networkStats", parseStats(stats));
+            envoy.put("networkStats", parseStats(stats, false));
 
         } catch (Exception e) {
             envoy.put("error", "Envoy Admin API nicht erreichbar: " + e.getMessage());
@@ -178,16 +163,25 @@ public class K8sDiagnosticService {
         return count + " aktive Upstream-Cluster-Einträge";
     }
 
-    private Map<String, String> parseStats(String rawStats) {
-        Map<String, String> statsMap = new HashMap<>();
+    private Map<String, String> parseStats(String rawStats, boolean onlyNonZero) {
+        Map<String, String> statsMap = onlyNonZero ? new TreeMap<>() : new HashMap<>();
         if (rawStats != null) {
             rawStats.lines()
                     .filter(line -> line.contains(":"))
                     .forEach(line -> {
                         int colonIndex = line.lastIndexOf(':');
                         if (colonIndex > 0 && colonIndex < line.length() - 1) {
-                            statsMap.put(line.substring(0, colonIndex).trim(),
-                                        line.substring(colonIndex + 1).trim());
+                            String key = line.substring(0, colonIndex).trim();
+                            String val = line.substring(colonIndex + 1).trim();
+                            if (onlyNonZero) {
+                                try {
+                                    if (Long.parseLong(val) > 0) {
+                                        statsMap.put(key, val);
+                                    }
+                                } catch (NumberFormatException ignored) {}
+                            } else {
+                                statsMap.put(key, val);
+                            }
                         }
                     });
         }
