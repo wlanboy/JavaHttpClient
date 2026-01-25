@@ -46,7 +46,7 @@ LABEL org.opencontainers.image.title="Java http client" \
       org.opencontainers.image.vendor="wlanboy" \
       org.opencontainers.image.source="https://github.com/wlanboy/JavaHttpClient" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.base.name="eclipse-temurin:25-jre"
+      org.opencontainers.image.base.name="ubi9/openjdk-25-runtime"
 
 WORKDIR /app
 
