@@ -35,7 +35,7 @@ docker build -f Dockerfile25 -t wlanboy/javahttpclient:jre .
 
 docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | grep "javahttpclient"
 wlanboy/javahttpclient   jre       510MB
-wlanboy/javahttpclient   jlink     223MB
+wlanboy/javahttpclient   jlink     259MB
 ```
 
 # Run container
