@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<layers xmlns="http://www.springframework.org/schema/boot/layers"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.springframework.org/schema/boot/layers
+                            https://www.springframework.org/schema/boot/layers/layers-3.0.xsd">
+    <application>
+        <into layer="spring-boot-loader">
+            <include>org/springframework/boot/loader/**</include>
+        </into>
+
+        <!-- Ressourcen getrennt vom Kompilat: yml, properties, xml -->
+        <!-- Kein Thymeleaf/Templates in diesem Projekt -->
+        <into layer="application-resources">
+            <include>BOOT-INF/classes/**/*.yml</include>
+            <include>BOOT-INF/classes/**/*.yaml</include>
+            <include>BOOT-INF/classes/**/*.properties</include>
+            <include>BOOT-INF/classes/**/*.xml</include>
+        </into>
+
+        <into layer="application" />
+    </application>
+
+    <dependencies>
+        <into layer="snapshot-dependencies">
+            <include>*:*:*SNAPSHOT</include>
+        </into>
+
+        <!-- Micrometer (tracing) + SpringDoc vorhanden -->
+        <into layer="observability-dependencies">
+            <include>io.micrometer:*</include>
+            <include>io.prometheus:*</include>
+            <include>org.springdoc:*</include>
+            <include>io.opentelemetry:*</include>
+        </into>
+
+        <into layer="dependencies" />
+    </dependencies>
+
+    <layerOrder>
+        <layer>dependencies</layer>
+        <layer>observability-dependencies</layer>
+        <layer>spring-boot-loader</layer>
+        <layer>snapshot-dependencies</layer>
+        <layer>application-resources</layer>
+        <layer>application</layer>
+    </layerOrder>
+</layers>

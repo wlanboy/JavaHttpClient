@@ -30,20 +30,20 @@ docker build -t wlanboy/javahttpclient:latest .
 # Docker build with jlink and without
 
 ```bash
-docker build -f Dockerfile25 -t wlanboy/javahttpclient:jre .
-docker build -f Dockerfile25Jlink -t wlanboy/javahttpclient:jlink .
+docker build -f Dockerfile25 -t javahttpclient:jre .
+docker build -f Dockerfile25Jlink -t javahttpclient:jlink .
 
 docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | grep "javahttpclient"
-wlanboy/javahttpclient   jre       510MB
-wlanboy/javahttpclient   jlink     175MB
+javahttpclient   jre       510MB
+javahttpclient   jlink     295MB
 ```
 
 # Run container
 
 ```bash
-docker run --rm --name httpclient --publish 8080:8080 wlanboy/javahttpclient:latest
+docker run --rm --name httpclient --publish 8080:8080 javahttpclient:jre
 
-docker run --rm --name httpclient --publish 8080:8080 wlanboy/javahttpclient:jlink
+docker run --rm --name httpclient --publish 8080:8080 javahttpclient:jlink
 ```
 
 # Docker hub

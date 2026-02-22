@@ -66,11 +66,17 @@ USER 185
 COPY --from=build --chown=185:185 /app/extracted/dependencies/ ./
 # → Kopiert nur die Dependency-Layer. Ändern sich selten.
 
+COPY --from=build --chown=185:185 /app/extracted/observability-dependencies/ ./
+# → Micrometer, SpringDoc – eigener Release-Zyklus.
+
 COPY --from=build --chown=185:185 /app/extracted/spring-boot-loader/ ./
 # → Enthält den Spring Boot Launcher (Main-Class Loader). Ändern sich selten.
 
 COPY --from=build --chown=185:185 /app/extracted/snapshot-dependencies/ ./
 # → Snapshot-Dependencies (z. B. lokale libs), ändern sich häufiger.
+
+COPY --from=build --chown=185:185 /app/extracted/application-resources/ ./
+# → Konfigurationsdateien (yml, properties, xml). Invalidiert nicht den Class-Layer.
 
 COPY --from=build --chown=185:185 /app/extracted/application/ ./
 # → Der eigentliche Applikationscode (Kompilat). Ändert sich.
