@@ -15,7 +15,8 @@ public record JavaHttpRequest(
     @Pattern(regexp = "^https?://.*", message = "URL muss mit http:// oder https:// beginnen")
     String url,
 
-    @Schema(description = "HTTP Methode", example = "POST")
+    @Schema(description = "HTTP Methode", example = "POST",
+            allowableValues = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"})
     @NotNull(message = "HTTP Methode ist erforderlich")
     HttpMethod method,
 

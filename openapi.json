@@ -1,0 +1,543 @@
+{
+    "openapi": "3.1.0",
+    "info": {
+        "title": "OpenAPI definition",
+        "version": "v0"
+    },
+    "servers": [
+        {
+            "url": "http://localhost:8080",
+            "description": "Generated server url"
+        }
+    ],
+    "tags": [
+        {
+            "name": "HTTP Client",
+            "description": "Sendet HTTP-Anfragen an beliebige Ziel-URLs weiter"
+        },
+        {
+            "name": "Kubernetes Diagnostics",
+            "description": "Diagnoseinformationen zu Kubernetes-Kontext und Istio-Sidecar"
+        }
+    ],
+    "paths": {
+        "/client": {
+            "post": {
+                "tags": [
+                    "HTTP Client"
+                ],
+                "summary": "HTTP-Request weiterleiten",
+                "description": "Sendet einen HTTP-Request mit der angegebenen Methode, URL und optionalem Body an das Ziel-System",
+                "operationId": "postMapping",
+                "parameters": [
+                    {
+                        "name": "headers",
+                        "in": "header",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/components/schemas/HttpHeaders"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/JavaHttpRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Antwort des Zielsystems",
+                        "content": {
+                            "*/*": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Ungültige Anfrage (Validierungsfehler)"
+                    },
+                    "502": {
+                        "description": "Fehler beim Verbinden mit dem Zielsystem"
+                    }
+                }
+            }
+        },
+        "/api/k8s/istio/{type}": {
+            "get": {
+                "tags": [
+                    "Kubernetes Diagnostics"
+                ],
+                "summary": "Istio-Ressourcen auflisten",
+                "description": "Listet spezifische Istio-Ressourcen eines Namespaces auf. Unterstützte Typen: `virtualservices`, `destinationrules`.",
+                "operationId": "getIstioResources",
+                "parameters": [
+                    {
+                        "name": "type",
+                        "in": "path",
+                        "description": "Istio-Ressourcentyp",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        },
+                        "example": "virtualservices"
+                    },
+                    {
+                        "name": "namespace",
+                        "in": "query",
+                        "description": "Kubernetes-Namespace",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "default"
+                        },
+                        "example": "default"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Liste der Istio-Ressourcen",
+                        "content": {
+                            "*/*": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {}
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Ungültiger Ressourcentyp"
+                    }
+                }
+            }
+        },
+        "/api/k8s/istio/full-report": {
+            "get": {
+                "tags": [
+                    "Kubernetes Diagnostics"
+                ],
+                "summary": "Vollständigen Istio-Report abrufen",
+                "description": "Holt alle Envoy-Konfigurationen und Fehlerstatistiken des Istio-Sidecars. Im Fehlerfall wird 200 mit Fehlerbeschreibung im Body zurückgegeben.",
+                "operationId": "getFullReport",
+                "responses": {
+                    "200": {
+                        "description": "Report generiert (enthält ggf. Fehlerbeschreibung im Body)",
+                        "content": {
+                            "*/*": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/k8s/context": {
+            "get": {
+                "tags": [
+                    "Kubernetes Diagnostics"
+                ],
+                "summary": "K8s-Kontext abrufen",
+                "description": "Liefert Namespace, Pod-Name und Istio-Sidecar-Status. Wird typischerweise beim Laden der Navbar verwendet.",
+                "operationId": "getContext",
+                "responses": {
+                    "200": {
+                        "description": "K8s-Kontextdaten erfolgreich abgerufen",
+                        "content": {
+                            "*/*": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "HttpMethod": {},
+            "JavaHttpRequest": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Die Ziel-URL",
+                        "example": "https://github.com",
+                        "minLength": 1,
+                        "pattern": "^https?://.*"
+                    },
+                    "method": {
+                        "$ref": "#/components/schemas/HttpMethod",
+                        "description": "HTTP Methode",
+                        "enum": [
+                            "GET",
+                            "POST",
+                            "PUT",
+                            "DELETE",
+                            "PATCH",
+                            "HEAD",
+                            "OPTIONS"
+                        ],
+                        "example": "POST"
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Optionaler Request Body",
+                        "example": {
+                            "key": "value"
+                        }
+                    },
+                    "contentType": {
+                        "type": "string",
+                        "description": "Content-Type des Bodys",
+                        "example": "application/json"
+                    },
+                    "copyHeaders": {
+                        "type": "boolean",
+                        "description": "Header kopieren"
+                    },
+                    "customHeaders": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        },
+                        "description": "Header hinzufuegen"
+                    }
+                },
+                "required": [
+                    "method",
+                    "url"
+                ]
+            },
+            "ContentDisposition": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "filename": {
+                        "type": "string"
+                    },
+                    "charset": {
+                        "type": "string"
+                    },
+                    "attachment": {
+                        "type": "boolean"
+                    },
+                    "formData": {
+                        "type": "boolean"
+                    },
+                    "inline": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "HttpHeaders": {
+                "type": "object",
+                "properties": {
+                    "empty": {
+                        "type": "boolean"
+                    },
+                    "location": {
+                        "type": "string",
+                        "format": "uri"
+                    },
+                    "host": {
+                        "type": "object",
+                        "properties": {
+                            "address": {
+                                "type": "object",
+                                "properties": {
+                                    "address": {
+                                        "type": "string",
+                                        "format": "byte"
+                                    },
+                                    "hostAddress": {
+                                        "type": "string"
+                                    },
+                                    "linkLocalAddress": {
+                                        "type": "boolean"
+                                    },
+                                    "hostName": {
+                                        "type": "string"
+                                    },
+                                    "multicastAddress": {
+                                        "type": "boolean"
+                                    },
+                                    "anyLocalAddress": {
+                                        "type": "boolean"
+                                    },
+                                    "loopbackAddress": {
+                                        "type": "boolean"
+                                    },
+                                    "siteLocalAddress": {
+                                        "type": "boolean"
+                                    },
+                                    "mcglobal": {
+                                        "type": "boolean"
+                                    },
+                                    "mcnodeLocal": {
+                                        "type": "boolean"
+                                    },
+                                    "mclinkLocal": {
+                                        "type": "boolean"
+                                    },
+                                    "mcsiteLocal": {
+                                        "type": "boolean"
+                                    },
+                                    "mcorgLocal": {
+                                        "type": "boolean"
+                                    },
+                                    "canonicalHostName": {
+                                        "type": "string"
+                                    }
+                                }
+                            },
+                            "port": {
+                                "type": "integer",
+                                "format": "int32"
+                            },
+                            "hostName": {
+                                "type": "string"
+                            },
+                            "unresolved": {
+                                "type": "boolean"
+                            },
+                            "hostString": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "all": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        },
+                        "writeOnly": true
+                    },
+                    "lastModified": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "date": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "contentLength": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "acceptCharset": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "contentDisposition": {
+                        "$ref": "#/components/schemas/ContentDisposition"
+                    },
+                    "range": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/HttpRange"
+                        }
+                    },
+                    "cacheControl": {
+                        "type": "string"
+                    },
+                    "origin": {
+                        "type": "string"
+                    },
+                    "connection": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "acceptLanguage": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "range": {
+                                    "type": "string"
+                                },
+                                "weight": {
+                                    "type": "number",
+                                    "format": "double"
+                                }
+                            }
+                        }
+                    },
+                    "basicAuth": {
+                        "type": "string",
+                        "writeOnly": true
+                    },
+                    "accept": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/MediaType"
+                        }
+                    },
+                    "acceptLanguageAsLocales": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "acceptPatch": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/MediaType"
+                        }
+                    },
+                    "accessControlAllowCredentials": {
+                        "type": "boolean"
+                    },
+                    "accessControlAllowHeaders": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "accessControlAllowMethods": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/HttpMethod"
+                        }
+                    },
+                    "accessControlAllowOrigin": {
+                        "type": "string"
+                    },
+                    "accessControlExposeHeaders": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "accessControlMaxAge": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "accessControlRequestHeaders": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "accessControlRequestMethod": {
+                        "$ref": "#/components/schemas/HttpMethod"
+                    },
+                    "allow": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/HttpMethod"
+                        },
+                        "uniqueItems": true
+                    },
+                    "bearerAuth": {
+                        "type": "string",
+                        "writeOnly": true
+                    },
+                    "contentLanguage": {
+                        "type": "string"
+                    },
+                    "etag": {
+                        "type": "string"
+                    },
+                    "expires": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "ifMatch": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "ifNoneMatch": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "ifUnmodifiedSince": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "pragma": {
+                        "type": "string"
+                    },
+                    "upgrade": {
+                        "type": "string"
+                    },
+                    "vary": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "ifModifiedSince": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "contentType": {
+                        "$ref": "#/components/schemas/MediaType"
+                    }
+                }
+            },
+            "HttpRange": {},
+            "MediaType": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string"
+                    },
+                    "subtype": {
+                        "type": "string"
+                    },
+                    "parameters": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
+                    },
+                    "qualityValue": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "concrete": {
+                        "type": "boolean"
+                    },
+                    "wildcardType": {
+                        "type": "boolean"
+                    },
+                    "wildcardSubtype": {
+                        "type": "boolean"
+                    },
+                    "subtypeSuffix": {
+                        "type": "string"
+                    },
+                    "charset": {
+                        "type": "string"
+                    }
+                }
+            }
+        }
+    }
+}
