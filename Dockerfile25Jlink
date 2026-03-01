@@ -4,6 +4,10 @@
 FROM registry.access.redhat.com/ubi9/openjdk-25:latest AS build
 WORKDIR /app
 
+RUN mkdir -p /app/config /app/data && \
+    touch /app/config/.keep /app/data/.keep && \
+    chmod -R g+w /app/config /app/data
+
 # Maven Caching & Build (wie gehabt)
 COPY pom.xml .
 RUN --mount=type=cache,target=/root/.m2 mvn -q -DskipTests dependency:go-offline
@@ -99,6 +103,9 @@ ENV PATH="/opt/jre/bin:$PATH"
 
 USER nonroot
 
+COPY --from=build --chown=65532:65532 /app/config /app/config
+COPY --from=build --chown=65532:65532 /app/data /app/data
+
 # Layer kopieren (wie gehabt)
 COPY --from=build --chown=65532:65532 /app/extracted/dependencies/ ./
 COPY --from=build --chown=65532:65532 /app/extracted/observability-dependencies/ ./
@@ -111,7 +118,6 @@ COPY --chown=65532:65532 containerconfig/application.properties /app/config/appl
 
 EXPOSE 8080
 
-#ENTRYPOINT ["/app/entrypoint.sh"]
 ENTRYPOINT [ \
     "/opt/jre/bin/java", \
     "-XX:SharedArchiveFile=/app/app.jsa", \

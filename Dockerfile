@@ -6,6 +6,10 @@ FROM registry.access.redhat.com/ubi9/openjdk-25:latest AS build
 
 WORKDIR /app
 
+RUN mkdir -p /app/config /app/data && \
+    touch /app/config/.keep /app/data/.keep && \
+    chmod -R g+w /app/config /app/data
+
 COPY pom.xml .
 # → Nur die pom.xml wird kopiert, damit Maven bereits alle Dependencies auflösen kann,
 #   ohne dass sich der Sourcecode ändert. Das verbessert das Layer-Caching.
@@ -50,18 +54,13 @@ LABEL org.opencontainers.image.title="Java http client" \
 
 WORKDIR /app
 
-USER root
-# → Temporär root, um Verzeichnisse anzulegen und Berechtigungen zu setzen.
-
-RUN mkdir -p /app/config /app/data && \
-    chown -R 185:0 /app && \
-    chmod -R g+w /app
-# → /app/config: für externe Konfigurationen
-# → /app/data: für persistente Daten
-# → Non-root User für sicheren Betrieb
-
 USER 185
-# → Zurück zum nicht-privilegierten User.
+
+COPY --from=build --chown=185:0 /app/config /app/config
+# → /app/config: für externe Konfigurationen (aus Build-Stage übernommen)
+
+COPY --from=build --chown=185:0 /app/data /app/data
+# → /app/data: für persistente Daten (aus Build-Stage übernommen)
 
 COPY --from=build --chown=185:185 /app/extracted/dependencies/ ./
 # → Kopiert nur die Dependency-Layer. Ändern sich selten.
@@ -89,11 +88,6 @@ COPY --chown=185:185 entrypoint.sh /app/entrypoint.sh
 
 EXPOSE 8080
 # → Dokumentiert den Port, den die App verwendet (Spring Boot Default).
-
-HEALTHCHECK --interval=30s --timeout=3s \
-  CMD curl -f http://localhost:8080/actuator/health || exit 1
-# → Nutzt den Spring Boot Actuator Health Endpoint.
-# → Alternativ: wget oder ein einfacher TCP-Check
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 # → Startet die App über das Entry-Skript.
