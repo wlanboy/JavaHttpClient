@@ -1,0 +1,31 @@
+# Maven build output
+target/
+
+# IDE & OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docker
+.dockerignore
+Dockerfile*
+
+# Docs & screenshots
+README.md
+layers.md
+screenshots/
+
+# Helm chart (not needed in image)
+javahttpclient-chart/
+
+# Scripts (not needed in image)
+multiarch-build.sh
+
+# Local config (wird via containerconfig/ eingebunden)
+application.properties

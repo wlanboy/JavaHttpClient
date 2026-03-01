@@ -28,7 +28,7 @@ RUN --mount=type=cache,target=/root/.m2 mvn -q -DskipTests compile spring-boot:p
 # → package: Baut das finale JAR inkl. AOT-Klassen.
 # → Wieder mit Maven-Cache, um Build-Zeit zu sparen.
 
-RUN cp target/javahttpclient-0.0.1-SNAPSHOT.jar app.jar && \
+RUN cp target/*.jar app.jar && \
     java -Djarmode=tools -jar app.jar extract --layers --launcher --destination extracted
 # → Spring Boot 4.x Layertools: --launcher ist erforderlich um den Loader zu extrahieren
 # → Extrahierte Layer:
@@ -37,6 +37,12 @@ RUN cp target/javahttpclient-0.0.1-SNAPSHOT.jar app.jar && \
 #     - snapshot-dependencies
 #     - application (BOOT-INF/classes)
 # → Vorteil: Docker kann diese Layer getrennt cachen → schnellere Deployments.
+
+RUN java -XX:ArchiveClassesAtExit=app.jsa \
+         -Dspring.context.exit=onRefresh \
+         -Dspring.aot.enabled=true \
+         -cp "extracted/dependencies/*:extracted/observability-dependencies/*:extracted/snapshot-dependencies/*:extracted/application/" \
+         org.springframework.boot.loader.launch.JarLauncher || [ -f app.jsa ]
 
 # ============================
 # 2. Runtime Stage (Java 25)
@@ -79,6 +85,8 @@ COPY --from=build --chown=185:185 /app/extracted/application-resources/ ./
 
 COPY --from=build --chown=185:185 /app/extracted/application/ ./
 # → Der eigentliche Applikationscode (Kompilat). Ändert sich.
+
+COPY --from=build --chown=185:185 /app/app.jsa /app/app.jsa
 
 COPY --chown=185:185 containerconfig/application.properties /app/config/application.properties
 # → Externe Konfiguration ins Config-Verzeichnis für die Referenz für ENV Vars

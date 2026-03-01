@@ -62,11 +62,8 @@ RUN $JAVA_HOME/bin/jlink \
     --no-man-pages \
     --no-header-files \
     --compress zip-9 \
-    --add-options "-XX:+UseZGC -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8" \    
+    --add-options "-XX:+UseZGC -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8" \
     --output /custom-jre
-
-# Erzeuge die Klassenliste für AppCDS
-RUN /custom-jre/bin/java -Djarmode=tools -jar app.jar extract --layers --destination cds-extraction
 
 # Erzeugt das Basis-Archiv für das Custom JRE
 RUN /custom-jre/bin/java -Xshare:dump
@@ -82,8 +79,8 @@ RUN /custom-jre/bin/java -XX:ArchiveClassesAtExit=app.jsa \
          -Dspring.aot.enabled=true \
          -cp "extracted/dependencies/*:extracted/observability-dependencies/*:extracted/snapshot-dependencies/*:extracted/application/" \
          org.springframework.boot.loader.launch.JarLauncher || [ -f app.jsa ]
-# Hinweis: Das "|| true" ist wichtig, da die App beim Training mangels DB/Config evtl. abbricht, 
-# aber das Archiv trotzdem schreibt.
+# Hinweis: "|| [ -f app.jsa ]" erlaubt einen Non-Zero Exit (z.B. fehlende DB/Config),
+# solange das Archiv trotzdem geschrieben wurde. Fehlt app.jsa, bricht der Build ab.
 
 # ============================
 # 3. Runtime Stage (Minimales OS)
@@ -125,8 +122,6 @@ ENTRYPOINT [ \
     "-Djava.security.egd=file:/dev/./urandom", \
     "-XX:MaxRAMPercentage=80", \
     "-XX:InitialRAMPercentage=40", \
-    "-XX:+UseZGC", \
-    "-XX:+ExitOnOutOfMemoryError", \
     "org.springframework.boot.loader.launch.JarLauncher", \
     "--spring.config.location=file:/app/config/application.properties" \
 ]
