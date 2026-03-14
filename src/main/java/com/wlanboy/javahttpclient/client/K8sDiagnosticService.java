@@ -22,13 +22,17 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 public class K8sDiagnosticService {
 
     private static final Logger logger = LoggerFactory.getLogger(K8sDiagnosticService.class);
-    private static final String ENVOY_ADMIN_URL = "http://127.0.0.1:15000";
     private static final String ISTIO_GROUP = "networking.istio.io";
-    private static final String ISTIO_VERSION = "v1alpha3";
+    private static final List<String> ISTIO_VERSIONS = List.of("v1", "v1beta1", "v1alpha3");
+    private static final Set<String> SUPPORTED_ISTIO_TYPES = Set.of(
+            "virtualservices", "destinationrules", "gateways", "serviceentries",
+            "sidecars", "envoyfilters", "peerauthentications", "requestauthentications",
+            "authorizationpolicies");
 
     private volatile ApiClient apiClient;
     private volatile CustomObjectsApi customObjectsApi;
     private final RestTemplate restTemplate;
+    private final String envoyAdminUrl;
     private volatile boolean k8sInitialized = false;
     private volatile String k8sInitError = null;
 
@@ -37,6 +41,7 @@ public class K8sDiagnosticService {
         factory.setConnectTimeout(Duration.ofSeconds(5));
         factory.setReadTimeout(Duration.ofSeconds(10));
         this.restTemplate = new RestTemplate(factory);
+        this.envoyAdminUrl = System.getenv().getOrDefault("ENVOY_ADMIN_URL", "http://127.0.0.1:15000");
         initializeK8sClient();
         logger.info("K8s Diagnostic Service initialisiert (K8s API verfügbar: {}).", k8sInitialized);
     }
@@ -49,10 +54,25 @@ public class K8sDiagnosticService {
             this.apiClient = Config.defaultClient();
             this.customObjectsApi = new CustomObjectsApi(apiClient);
             this.k8sInitialized = true;
+            this.k8sInitError = null;
         } catch (IOException e) {
             logger.warn("K8s API Client konnte nicht initialisiert werden: {}. Istio-Ressourcen nicht verfügbar.", e.getMessage());
             this.k8sInitError = e.getMessage();
         }
+    }
+
+    public Map<String, Object> getK8sStatus() {
+        if (!k8sInitialized) {
+            initializeK8sClient();
+        }
+        Map<String, Object> status = new LinkedHashMap<>();
+        status.put("initialized", k8sInitialized);
+        status.put("supportedIstioTypes", SUPPORTED_ISTIO_TYPES);
+        status.put("istioVersionsProbed", ISTIO_VERSIONS);
+        if (k8sInitError != null) {
+            status.put("initError", k8sInitError);
+        }
+        return status;
     }
 
     public Map<String, Object> getContext() {
@@ -81,9 +101,8 @@ public class K8sDiagnosticService {
         try {
             // Sektion A: Erreichbarkeit
             Map<String, Object> reachability = new HashMap<>();
-
-            reachability.put("envoyConfig", restTemplate.getForObject(ENVOY_ADMIN_URL + "/config_dump", Map.class));
-            String clusters = restTemplate.getForObject(ENVOY_ADMIN_URL + "/clusters", String.class);
+            reachability.put("envoyConfig", restTemplate.getForObject(envoyAdminUrl + "/config_dump", Map.class));
+            String clusters = restTemplate.getForObject(envoyAdminUrl + "/clusters", String.class);
             reachability.put("activeEndpoints", clusters);
             reachability.put("summary", summarizeClusters(clusters));
             report.put("reachability", reachability);
@@ -91,7 +110,7 @@ public class K8sDiagnosticService {
             // Sektion B: Gesundheit & Fehler
             Map<String, Object> health = new HashMap<>();
             String rawStats = restTemplate.getForObject(
-                    ENVOY_ADMIN_URL + "/stats?filter=.*(errors|5xx|timeout|retry|failed|reset|refused|overflow).*",
+                    envoyAdminUrl + "/stats?filter=.*(errors|5xx|timeout|retry|failed|reset|refused|overflow).*",
                     String.class);
             Map<String, String> activeErrors = parseStats(rawStats, true);
             health.put("activeErrorMetrics", activeErrors);
@@ -106,21 +125,16 @@ public class K8sDiagnosticService {
         return report;
     }
 
-
     private Map<String, Object> getEnvoyDetails() {
         Map<String, Object> envoy = new HashMap<>();
         try {
-            // Server Info (Version, State)
-            envoy.put("info", restTemplate.getForObject(ENVOY_ADMIN_URL + "/server_info", Map.class));
+            envoy.put("info", restTemplate.getForObject(envoyAdminUrl + "/server_info", Map.class));
 
-            // Aktive Netzwerk-Cluster (Ziele, die Envoy kennt)
-            // Wir nehmen hier nur eine Zusammenfassung, da der Output riesig sein kann
-            String clusters = restTemplate.getForObject(ENVOY_ADMIN_URL + "/clusters", String.class);
+            String clusters = restTemplate.getForObject(envoyAdminUrl + "/clusters", String.class);
             envoy.put("clusterSummary", summarizeClusters(clusters));
 
-            // Wichtige Netzwerk-Stats (Retries, Timeouts, 5xx Fehler)
             String stats = restTemplate.getForObject(
-                    ENVOY_ADMIN_URL + "/stats?filter=cluster.*.upstream_rq_(5xx|timeout|retry)", String.class);
+                    envoyAdminUrl + "/stats?filter=cluster.*.upstream_rq_(5xx|timeout|retry)", String.class);
             envoy.put("networkStats", parseStats(stats, false));
 
         } catch (Exception e) {
@@ -131,28 +145,43 @@ public class K8sDiagnosticService {
 
     @SuppressWarnings("unchecked")
     public List<Object> getIstioResources(String namespace, String type) {
+        String plural = type.toLowerCase().endsWith("s") ? type.toLowerCase() : type.toLowerCase() + "s";
+
+        if (!SUPPORTED_ISTIO_TYPES.contains(plural)) {
+            throw new IllegalArgumentException(
+                    "Ungültiger Istio-Ressourcentyp: '" + type + "'. Erlaubt: " + SUPPORTED_ISTIO_TYPES);
+        }
+
+        if (!k8sInitialized) {
+            initializeK8sClient();
+        }
         if (!k8sInitialized) {
             logger.warn("K8s API nicht verfügbar: {}", k8sInitError);
             return Collections.emptyList();
         }
 
-        try {
-            String plural = type.toLowerCase().endsWith("s") ? type.toLowerCase() : type.toLowerCase() + "s";
+        for (String version : ISTIO_VERSIONS) {
+            try {
+                logger.info("Abfrage Istio API: Group={}, Version={}, Namespace={}, Plural={}",
+                        ISTIO_GROUP, version, namespace, plural);
 
-            logger.info("Abfrage Istio API: Group={}, Namespace={}, Plural={}", ISTIO_GROUP, namespace, plural);
+                Object result = customObjectsApi
+                        .listNamespacedCustomObject(ISTIO_GROUP, version, namespace, plural)
+                        .execute();
 
-            Object result = customObjectsApi
-                    .listNamespacedCustomObject(ISTIO_GROUP, ISTIO_VERSION, namespace, plural)
-                    .execute();
-
-            if (result instanceof Map) {
-                List<Object> items = (List<Object>) ((Map<String, Object>) result).get("items");
-                logger.info("API Erfolg: {} Ressourcen gefunden.", items.size());
-                return items;
+                if (result instanceof Map<?, ?> resultMap) {
+                    List<Object> items = (List<Object>) resultMap.get("items");
+                    if (items != null) {
+                        logger.info("API Erfolg ({}): {} Ressourcen gefunden.", version, items.size());
+                        return items;
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("Kein Ergebnis für Version {} ({}): {}", version, type, e.getMessage());
             }
-        } catch (Exception e) {
-            logger.error("Kritischer Fehler beim API-Call ({}): {}", type, e.getMessage());
         }
+
+        logger.error("Keine Istio-Ressourcen für '{}' in allen Versionen {} gefunden.", type, ISTIO_VERSIONS);
         return Collections.emptyList();
     }
 
@@ -178,7 +207,8 @@ public class K8sDiagnosticService {
                                     if (Long.parseLong(val) > 0) {
                                         statsMap.put(key, val);
                                     }
-                                } catch (NumberFormatException ignored) {}
+                                } catch (NumberFormatException ignored) {
+                                }
                             } else {
                                 statsMap.put(key, val);
                             }

@@ -107,6 +107,7 @@ class DiagnosticControllerTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     void getIstioResources_withVirtualServices_returnsResources() {
         List<Object> resources = List.of(
                 Map.of("metadata", Map.of("name", "vs-test")),
@@ -114,49 +115,66 @@ class DiagnosticControllerTest {
         );
         when(k8sService.getIstioResources("default", "virtualservices")).thenReturn(resources);
 
-        ResponseEntity<List<Object>> response = controller.getIstioResources("virtualservices", "default");
+        ResponseEntity<?> response = controller.getIstioResources("virtualservices", "default");
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
-        assertEquals(2, response.getBody().size());
+        assertEquals(2, ((List<Object>) response.getBody()).size());
         verify(k8sService).getIstioResources("default", "virtualservices");
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     void getIstioResources_withDestinationRules_returnsResources() {
         List<Object> resources = List.of(
                 Map.of("metadata", Map.of("name", "dr-service-a"))
         );
         when(k8sService.getIstioResources("production", "destinationrules")).thenReturn(resources);
 
-        ResponseEntity<List<Object>> response = controller.getIstioResources("destinationrules", "production");
+        ResponseEntity<?> response = controller.getIstioResources("destinationrules", "production");
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
-        assertEquals(1, response.getBody().size());
+        assertEquals(1, ((List<Object>) response.getBody()).size());
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     void getIstioResources_withDefaultNamespace_usesDefault() {
         when(k8sService.getIstioResources("default", "virtualservices")).thenReturn(Collections.emptyList());
 
-        ResponseEntity<List<Object>> response = controller.getIstioResources("virtualservices", "default");
+        ResponseEntity<?> response = controller.getIstioResources("virtualservices", "default");
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
-        assertTrue(response.getBody().isEmpty());
+        assertTrue(((List<Object>) response.getBody()).isEmpty());
         verify(k8sService).getIstioResources("default", "virtualservices");
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     void getIstioResources_noResourcesFound_returnsEmptyList() {
         when(k8sService.getIstioResources("test-ns", "gateways")).thenReturn(Collections.emptyList());
 
-        ResponseEntity<List<Object>> response = controller.getIstioResources("gateways", "test-ns");
+        ResponseEntity<?> response = controller.getIstioResources("gateways", "test-ns");
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
-        assertTrue(response.getBody().isEmpty());
+        assertTrue(((List<Object>) response.getBody()).isEmpty());
+    }
+
+    @Test
+    void getIstioResources_withInvalidType_returnsBadRequest() {
+        when(k8sService.getIstioResources("default", "pods"))
+                .thenThrow(new IllegalArgumentException("Ungültiger Istio-Ressourcentyp: 'pods'"));
+
+        ResponseEntity<?> response = controller.getIstioResources("pods", "default");
+
+        assertEquals(400, response.getStatusCode().value());
+        assertNotNull(response.getBody());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) response.getBody();
+        assertTrue(body.get("error").toString().contains("pods"));
     }
 
     @Test
