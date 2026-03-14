@@ -84,21 +84,23 @@ const K8sClient = (() => {
 
                 // --- TAB C: POD KONTEXT ---
                 const istioDetails = context.istioDetails;
-                const contextRows = Object.entries(context)
-                    .filter(([key]) => key !== 'istioDetails')
-                    .map(([key, val]) => {
-                        let displayVal = val;
-                        let badgeClass = "bg-light text-dark border";
-                        if (typeof val === 'boolean') {
-                            badgeClass = val ? "bg-success text-white" : "bg-danger text-white";
-                            displayVal = val ? "JA" : "NEIN";
-                        }
-                        return `
-                        <tr>
-                            <td class="bg-light fw-bold small text-muted w-25">${key}</td>
-                            <td><span class="badge ${badgeClass} font-monospace">${displayVal}</span></td>
-                        </tr>`;
-                    }).join('');
+                const contextRows = context.error
+                    ? `<tr><td colspan="2"><div class="alert alert-warning x-small m-0">${context.error}</div></td></tr>`
+                    : Object.entries(context)
+                        .filter(([key]) => key !== 'istioDetails')
+                        .map(([key, val]) => {
+                            let displayVal = String(val);
+                            let badgeClass = "bg-light text-dark border";
+                            if (typeof val === 'boolean') {
+                                badgeClass = val ? "bg-success text-white" : "bg-danger text-white";
+                                displayVal = val ? "JA" : "NEIN";
+                            }
+                            return `
+                            <tr>
+                                <td class="bg-light fw-bold small text-muted w-25">${key}</td>
+                                <td><span class="badge ${badgeClass} font-monospace">${displayVal}</span></td>
+                            </tr>`;
+                        }).join('');
 
                 const istioDetailsHtml = istioDetails ? (() => {
                     if (istioDetails.error) {
@@ -132,13 +134,12 @@ const K8sClient = (() => {
                 })() : '';
 
                 const statusRows = status ? Object.entries(status).map(([key, val]) => {
-                    let displayVal = Array.isArray(val) ? val.join('<br>') : String(val);
                     let badgeClass = key === 'initialized'
                         ? (val ? 'bg-success text-white' : 'bg-danger text-white')
                         : 'bg-light text-dark border';
                     const cellContent = Array.isArray(val)
                         ? val.map(v => `<span class="badge ${badgeClass} font-monospace me-1 mb-1">${v}</span>`).join('')
-                        : `<span class="badge ${badgeClass} font-monospace">${displayVal}</span>`;
+                        : `<span class="badge ${badgeClass} font-monospace">${String(val)}</span>`;
                     return `
                     <tr>
                         <td class="bg-light fw-bold small text-muted w-25">${key}</td>
