@@ -1,3 +1,5 @@
+[![Java CI with Maven](https://github.com/wlanboy/JavaHttpClient/actions/workflows/maven.yml/badge.svg)](https://github.com/wlanboy/JavaHttpClient/actions/workflows/maven.yml)
+
 # JavaHttpClient
 
 Spring based rest service to test http routes in kubernetes.
