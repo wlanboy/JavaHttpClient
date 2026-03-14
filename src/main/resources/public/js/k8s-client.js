@@ -198,9 +198,15 @@ const K8sClient = (() => {
         if (!section) return;
 
         const TYPES = [
-            { key: 'virtualservices',  label: 'VirtualServices',  icon: 'bi-diagram-3' },
-            { key: 'destinationrules', label: 'DestinationRules', icon: 'bi-signpost-split' },
-            { key: 'gateways',         label: 'Gateways',         icon: 'bi-door-open' },
+            { key: 'virtualservices',       label: 'VirtualServices',       icon: 'bi-diagram-3' },
+            { key: 'destinationrules',      label: 'DestinationRules',      icon: 'bi-signpost-split' },
+            { key: 'gateways',              label: 'Gateways',              icon: 'bi-door-open' },
+            { key: 'serviceentries',        label: 'ServiceEntries',        icon: 'bi-plug' },
+            { key: 'sidecars',              label: 'SidecarConfigs',        icon: 'bi-box' },
+            { key: 'envoyfilters',          label: 'EnvoyFilters',          icon: 'bi-funnel' },
+            { key: 'peerauthentications',   label: 'PeerAuthentications',   icon: 'bi-key' },
+            { key: 'requestauthentications',label: 'RequestAuthentications',icon: 'bi-person-check' },
+            { key: 'authorizationpolicies', label: 'AuthorizationPolicies', icon: 'bi-shield-lock' },
         ];
 
         try {
