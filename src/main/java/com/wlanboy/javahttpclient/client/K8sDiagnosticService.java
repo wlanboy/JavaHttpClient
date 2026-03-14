@@ -110,7 +110,7 @@ public class K8sDiagnosticService {
             // Sektion B: Gesundheit & Fehler
             Map<String, Object> health = new HashMap<>();
             String rawStats = restTemplate.getForObject(
-                    envoyAdminUrl + "/stats?filter=.*(errors|5xx|timeout|retry|failed|reset|refused|overflow).*",
+                    envoyAdminUrl + "/stats?filter=.*(errors|5xx|timeout|retry|fail|reset|refused|overflow|pending|cx_none).*",
                     String.class);
             Map<String, String> activeErrors = parseStats(rawStats, true);
             health.put("activeErrorMetrics", activeErrors);
