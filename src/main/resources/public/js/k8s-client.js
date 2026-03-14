@@ -6,7 +6,14 @@ const K8sClient = (() => {
 
     async function apiFetch(endpoint) {
         const response = await fetch(endpoint);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) {
+            let errorMsg = `HTTP ${response.status}`;
+            try {
+                const body = await response.json();
+                if (body.error) errorMsg = body.error;
+            } catch (_) {}
+            throw new Error(errorMsg);
+        }
         return await response.json();
     }
 
@@ -25,50 +32,125 @@ const K8sClient = (() => {
             [configDiv, errorDiv, resourceDiv].forEach(el => { if (el) el.innerHTML = spinner; });
 
             try {
-                const [report, context] = await Promise.all([
+                const [report, context, status] = await Promise.all([
                     apiFetch('/api/k8s/istio/full-report'),
-                    K8sClient.loadContext()
+                    K8sClient.loadContext(),
+                    apiFetch('/api/k8s/status').catch(() => null)
                 ]);
 
-                // --- TAB A & B (Config & Errors) ---
-                // (Deine bestehende Logik für diese Tabs...)
-                configDiv.innerHTML = `<pre class="console x-small p-3 bg-dark text-success" style="border-radius:4px;">${report.reachability.activeEndpoints}</pre>`;
+                // --- TAB A: Config & Erreichbarkeit ---
+                if (report.error) {
+                    const warning = `<div class="alert alert-warning m-3 small"><i class="bi bi-exclamation-triangle me-2"></i>${report.error}</div>`;
+                    configDiv.innerHTML = warning;
+                    errorDiv.innerHTML = `<div class="alert alert-warning m-3 small">Keine Daten – Sidecar nicht aktiv.</div>`;
+                } else {
+                    const r = report.reachability ?? {};
+                    const clusterLines = (r.activeEndpoints ?? '').split('\n').filter(l => l.trim());
+                    configDiv.innerHTML = `
+                        <div class="d-flex align-items-center justify-content-between mb-2 px-1">
+                            <span class="badge bg-secondary"><i class="bi bi-diagram-3 me-1"></i>${r.summary ?? ''}</span>
+                            <button class="btn btn-sm btn-outline-secondary x-small" onclick="this.closest('.d-flex').nextElementSibling.classList.toggle('d-none')">
+                                <i class="bi bi-code-slash me-1"></i>Envoy Config (JSON)
+                            </button>
+                        </div>
+                        <div class="d-none mb-2">
+                            <pre class="x-small p-2" style="background:#1e1e1e;color:#4af626;border-radius:4px;max-height:300px;overflow:auto;">${JSON.stringify(r.envoyConfig, null, 2)}</pre>
+                        </div>
+                        <div class="input-group input-group-sm mb-2">
+                            <span class="input-group-text bg-dark border-secondary text-secondary"><i class="bi bi-search"></i></span>
+                            <input type="text" id="clusterSearch" class="form-control form-control-sm x-small bg-dark text-success border-secondary" placeholder="Cluster filtern...">
+                            <span id="clusterCount" class="input-group-text bg-dark border-secondary text-secondary x-small">${clusterLines.length}</span>
+                        </div>
+                        <pre id="clusterOutput" class="console x-small p-3 bg-dark text-success" style="border-radius:4px;max-height:400px;overflow:auto;">${clusterLines.join('\n')}</pre>`;
 
-                const errorEntries = Object.entries(report.healthDiagnostics.activeErrorMetrics);
-                errorDiv.innerHTML = errorEntries.length === 0 ?
-                    `<div class="alert alert-success small">Keine Fehler.</div>` :
-                    `<table class="table table-sm small">${errorEntries.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>`;
+                    document.getElementById('clusterSearch').addEventListener('input', function () {
+                        const term = this.value.toLowerCase();
+                        const filtered = term ? clusterLines.filter(l => l.toLowerCase().includes(term)) : clusterLines;
+                        document.getElementById('clusterOutput').textContent = filtered.join('\n');
+                        document.getElementById('clusterCount').textContent = filtered.length;
+                    });
 
+                    // --- TAB B: Fehler-Metriken ---
+                    const errorEntries = Object.entries(report.healthDiagnostics?.activeErrorMetrics ?? {});
+                    const errorCount = report.healthDiagnostics?.errorCount ?? errorEntries.length;
+                    errorDiv.innerHTML = errorEntries.length === 0 ?
+                        `<div class="alert alert-success small"><i class="bi bi-check-circle me-2"></i>Keine aktiven Fehler-Metriken.</div>` :
+                        `<div class="mb-2"><span class="badge bg-danger">${errorCount} aktive Fehler</span></div>
+                         <table class="table table-sm x-small">
+                             <thead><tr><th>Metrik</th><th>Wert</th></tr></thead>
+                             <tbody>${errorEntries.map(([k, v]) => `<tr><td class="font-monospace text-truncate" style="max-width:300px;" title="${k}">${k}</td><td class="fw-bold text-danger">${v}</td></tr>`).join('')}</tbody>
+                         </table>`;
+                }
 
-                // --- TAB C: POD KONTEXT (Dynamisch) ---
-                const contextRows = Object.entries(context).map(([key, val]) => {
-                    let displayVal = val;
-                    let badgeClass = "bg-light text-dark border";
+                // --- TAB C: POD KONTEXT ---
+                const istioDetails = context.istioDetails;
+                const contextRows = Object.entries(context)
+                    .filter(([key]) => key !== 'istioDetails')
+                    .map(([key, val]) => {
+                        let displayVal = val;
+                        let badgeClass = "bg-light text-dark border";
+                        if (typeof val === 'boolean') {
+                            badgeClass = val ? "bg-success text-white" : "bg-danger text-white";
+                            displayVal = val ? "JA" : "NEIN";
+                        }
+                        return `
+                        <tr>
+                            <td class="bg-light fw-bold small text-muted w-25">${key}</td>
+                            <td><span class="badge ${badgeClass} font-monospace">${displayVal}</span></td>
+                        </tr>`;
+                    }).join('');
 
-                    // 1. Behandlung von Booleans (true/false)
-                    if (typeof val === 'boolean') {
-                        badgeClass = val ? "bg-success text-white" : "bg-danger text-white";
-                        displayVal = val ? "JA" : "NEIN";
+                const istioDetailsHtml = istioDetails ? (() => {
+                    if (istioDetails.error) {
+                        return `<div class="alert alert-warning x-small mt-3">${istioDetails.error}</div>`;
                     }
-                    // 2. Behandlung von komplexen Objekten (wie deine istioDetails)
-                    else if (typeof val === 'object' && val !== null) {
-                        // Wir zeigen in der Tabelle nur einen Hinweis, die Details sind im JSON-Button
-                        displayVal = `<i class="bi bi-diagram-3 me-1"></i> Objekt (siehe Details)`;
-                        badgeClass = "bg-info text-dark border";
-                    }
+                    return `
+                    <div class="border-top pt-3 mt-3">
+                        <h6 class="x-small fw-bold text-uppercase text-muted mb-2">Istio Sidecar Details</h6>
+                        <table class="table table-sm x-small border shadow-sm">
+                            <tbody>
+                                <tr>
+                                    <td class="bg-light fw-bold text-muted w-25">clusterSummary</td>
+                                    <td><span class="badge bg-secondary font-monospace">${istioDetails.clusterSummary ?? '-'}</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        ${istioDetails.networkStats && Object.keys(istioDetails.networkStats).length > 0 ? `
+                        <label class="x-small fw-bold text-muted mb-1">Network Stats</label>
+                        <table class="table table-sm x-small border">
+                            <thead><tr><th>Metrik</th><th>Wert</th></tr></thead>
+                            <tbody>${Object.entries(istioDetails.networkStats).map(([k, v]) => `<tr><td class="font-monospace" title="${k}">${k}</td><td>${v}</td></tr>`).join('')}</tbody>
+                        </table>` : ''}
+                        ${istioDetails.info ? `
+                        <button class="btn btn-sm btn-outline-secondary x-small mb-2" onclick="this.nextElementSibling.classList.toggle('d-none')">
+                            <i class="bi bi-info-circle me-1"></i>Server Info (JSON)
+                        </button>
+                        <div class="d-none mb-2">
+                            <pre class="x-small p-2" style="background:#1e1e1e;color:#4af626;border-radius:4px;max-height:200px;overflow:auto;">${JSON.stringify(istioDetails.info, null, 2)}</pre>
+                        </div>` : ''}
+                    </div>`;
+                })() : '';
 
+                const statusRows = status ? Object.entries(status).map(([key, val]) => {
+                    let displayVal = Array.isArray(val) ? val.join('<br>') : String(val);
+                    let badgeClass = key === 'initialized'
+                        ? (val ? 'bg-success text-white' : 'bg-danger text-white')
+                        : 'bg-light text-dark border';
+                    const cellContent = Array.isArray(val)
+                        ? val.map(v => `<span class="badge ${badgeClass} font-monospace me-1 mb-1">${v}</span>`).join('')
+                        : `<span class="badge ${badgeClass} font-monospace">${displayVal}</span>`;
                     return `
                     <tr>
                         <td class="bg-light fw-bold small text-muted w-25">${key}</td>
-                        <td><span class="badge ${badgeClass} font-monospace">${displayVal}</span></td>
+                        <td>${cellContent}</td>
                     </tr>`;
-                }).join('');
+                }).join('') : '';
 
                 resourceDiv.innerHTML = `
                 <div class="p-2">
                     <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
                         <h6 class="x-small fw-bold text-uppercase text-muted mb-0">Identität & Kontext</h6>
-                        <button class="btn btn-xs btn-outline-primary" onclick="this.parentElement.nextElementSibling.nextElementSibling.classList.toggle('d-none')">
+                        <button class="btn btn-sm btn-outline-primary x-small" onclick="this.closest('.d-flex').nextElementSibling.nextElementSibling.classList.toggle('d-none')">
                             <i class="bi bi-eye me-1"></i> Details (JSON)
                         </button>
                     </div>
@@ -79,10 +161,18 @@ const K8sClient = (() => {
 
                     <div class="d-none mt-3">
                         <label class="x-small fw-bold text-muted mb-1">KOMPLETTER KONTEXT (RAW):</label>
-                        <pre class="x-small p-3 shadow-inner" 
-                            style="background-color: #1e1e1e; color: #4af626; border-radius: 6px; border: 1px solid #333; overflow: auto; max-height: 500px; font-family: 'Fira Code', monospace;"
-                        >${JSON.stringify(context, null, 4)}</pre>
+                        <pre class="x-small p-3" style="background-color:#1e1e1e;color:#4af626;border-radius:6px;border:1px solid #333;overflow:auto;max-height:500px;font-family:'Fira Code',monospace;">${JSON.stringify(context, null, 4)}</pre>
                     </div>
+
+                    ${istioDetailsHtml}
+
+                    ${statusRows ? `
+                    <div class="border-top pt-3 mt-3">
+                        <h6 class="x-small fw-bold text-uppercase text-muted mb-2">K8s Client Status</h6>
+                        <table class="table table-sm border shadow-sm">
+                            <tbody>${statusRows}</tbody>
+                        </table>
+                    </div>` : ''}
                 </div>`;
 
             } catch (err) {
@@ -104,6 +194,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const ctx = await K8sClient.loadContext();
     if (contextEl && !ctx.error) {
         contextEl.innerHTML = `
+            <span class="badge bg-dark border me-2"><i class="bi bi-cpu me-1"></i>${ctx.podName}</span>
             <span class="badge bg-dark border me-2"><i class="bi bi-tags me-1"></i>${ctx.namespace}</span>
             <span class="badge ${ctx.istioSidecar ? 'bg-success' : 'bg-warning text-dark'}">Istio: ${ctx.istioSidecar ? 'ON' : 'OFF'}</span>`;
     }
