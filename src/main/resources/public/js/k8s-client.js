@@ -279,6 +279,7 @@ const K8sClient = (() => {
             // Matched VS/DR Namen für Highlighting sammeln
             const matchedVsNames = new Set((correlation?.matchedVirtualServices ?? []).map(v => v.name));
             const matchedDrNames = new Set((correlation?.matchedDestinationRules ?? []).map(d => d.name));
+            const matchedSeNames = new Set((correlation?.matchedServiceEntries ?? []).map(s => s.name));
 
             const cards = TYPES.map((t, i) => {
                 const items = Array.isArray(results[i]) ? results[i] : [];
@@ -288,11 +289,12 @@ const K8sClient = (() => {
 
                 const isVs = t.key === 'virtualservices';
                 const isDr = t.key === 'destinationrules';
+                const isSe = t.key === 'serviceentries';
 
                 const itemCards = items.map(item => {
                     const name = item.metadata?.name ?? '?';
                     const id = `res-${t.key}-${name}`.replace(/[^a-z0-9-]/gi, '-');
-                    const isMatched = (isVs && matchedVsNames.has(name)) || (isDr && matchedDrNames.has(name));
+                    const isMatched = (isVs && matchedVsNames.has(name)) || (isDr && matchedDrNames.has(name)) || (isSe && matchedSeNames.has(name));
                     const matchBadge = isMatched ? `<span class="badge bg-success ms-1 x-small">URL-Match</span>` : '';
                     const borderClass = isMatched ? 'border-success border-2' : '';
                     return `
@@ -397,7 +399,30 @@ const K8sClient = (() => {
             </div>`;
         }).join('');
 
-        const hasAny = vsMatches.length > 0 || drMatches.length > 0;
+        const seMatches = corr.matchedServiceEntries ?? [];
+        const seHtml = seMatches.map(se => {
+            const ports = (se.ports ?? []).map(p =>
+                `<span class="badge bg-dark font-monospace me-1">${p.number}/${p.protocol ?? p.name ?? '?'}</span>`
+            ).join('');
+            const portWarning = se.portMatchWarning
+                ? `<div class="x-small text-warning mt-1"><i class="bi bi-exclamation-triangle me-1"></i>${se.portMatchWarning}</div>` : '';
+            const portMatchBadge = se.portMatch === false
+                ? `<span class="badge bg-warning text-dark ms-1">Port nicht definiert</span>`
+                : se.portMatch === true ? `<span class="badge bg-success ms-1">Port-Match</span>` : '';
+            return `
+            <div class="mb-2">
+                <div class="fw-bold x-small"><i class="bi bi-plug me-1"></i>${se.name} ${portMatchBadge}</div>
+                <div class="x-small text-muted">Hosts: ${(se.seHosts ?? []).join(', ')}</div>
+                <div class="x-small">
+                    ${se.location ? `<span class="badge bg-secondary me-1">${se.location}</span>` : ''}
+                    ${se.resolution ? `<span class="badge bg-secondary me-1">resolution: ${se.resolution}</span>` : ''}
+                    ${ports}
+                </div>
+                ${portWarning}
+            </div>`;
+        }).join('');
+
+        const hasAny = vsMatches.length > 0 || drMatches.length > 0 || seMatches.length > 0;
         const summaryBadge = hasAny
             ? `<span class="badge bg-success">Match gefunden</span>`
             : `<span class="badge bg-warning text-dark">Kein Match – URL nicht durch Istio-Config abgedeckt</span>`;
@@ -412,6 +437,7 @@ const K8sClient = (() => {
             </div>
             ${vsMatches.length > 0 ? `<div class="mb-1 x-small fw-bold text-muted">VirtualServices</div>${vsHtml}` : ''}
             ${drMatches.length > 0 ? `<div class="mb-1 x-small fw-bold text-muted border-top pt-2 mt-1">DestinationRules</div>${drHtml}` : ''}
+            ${seMatches.length > 0 ? `<div class="mb-1 x-small fw-bold text-muted border-top pt-2 mt-1">ServiceEntries</div>${seHtml}` : ''}
         </div>`;
     }
 

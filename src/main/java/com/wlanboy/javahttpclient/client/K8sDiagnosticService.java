@@ -172,9 +172,17 @@ public class K8sDiagnosticService {
                 if (Boolean.TRUE.equals(analysis.get("hostMatch"))) matchedDrs.add(analysis);
             }
 
+            List<Map<String, Object>> matchedSes = new ArrayList<>();
+            for (Object seObj : getIstioResources(namespace, "serviceentries")) {
+                if (!(seObj instanceof Map<?, ?> se)) continue;
+                Map<String, Object> analysis = analyzeServiceEntry(se, host, port);
+                if (Boolean.TRUE.equals(analysis.get("hostMatch"))) matchedSes.add(analysis);
+            }
+
             result.put("matchedVirtualServices", matchedVs);
             result.put("matchedDestinationRules", matchedDrs);
-            result.put("hasMatch", !matchedVs.isEmpty() || !matchedDrs.isEmpty());
+            result.put("matchedServiceEntries", matchedSes);
+            result.put("hasMatch", !matchedVs.isEmpty() || !matchedDrs.isEmpty() || !matchedSes.isEmpty());
         } catch (Exception e) {
             result.put("error", e.getMessage());
         }
@@ -300,6 +308,45 @@ public class K8sDiagnosticService {
             }
             result.put("subsets", subsetList);
         }
+        return result;
+    }
+
+    private Map<String, Object> analyzeServiceEntry(Map<?, ?> se, String targetHost, int targetPort) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        Map<?, ?> metadata = (Map<?, ?>) se.get("metadata");
+        Map<?, ?> spec = (Map<?, ?>) se.get("spec");
+        result.put("name", metadata != null ? metadata.get("name") : "?");
+        result.put("hostMatch", false);
+        if (spec == null) return result;
+
+        List<?> seHosts = (List<?>) spec.get("hosts");
+        if (seHosts == null) return result;
+
+        boolean hostMatch = seHosts.stream().map(Object::toString).anyMatch(h -> hostsMatch(h, targetHost));
+        result.put("hostMatch", hostMatch);
+        result.put("seHosts", seHosts);
+        if (!hostMatch) return result;
+
+        if (spec.get("location") != null)   result.put("location", spec.get("location"));
+        if (spec.get("resolution") != null) result.put("resolution", spec.get("resolution"));
+
+        // Ports prüfen ob der angeforderte Port abgedeckt ist
+        List<?> ports = (List<?>) spec.get("ports");
+        if (ports != null) {
+            result.put("ports", ports);
+            if (targetPort > 0) {
+                boolean portMatch = ports.stream()
+                    .filter(p -> p instanceof Map<?, ?>)
+                    .map(p -> (Map<?, ?>) p)
+                    .anyMatch(p -> String.valueOf(targetPort).equals(String.valueOf(p.get("number"))));
+                result.put("portMatch", portMatch);
+                if (!portMatch) result.put("portMatchWarning",
+                    "Port " + targetPort + " ist nicht in den ServiceEntry-Ports definiert.");
+            }
+        }
+
+        if (spec.get("endpoints") != null)        result.put("endpoints", spec.get("endpoints"));
+        if (spec.get("subjectAltNames") != null)  result.put("subjectAltNames", spec.get("subjectAltNames"));
         return result;
     }
 
