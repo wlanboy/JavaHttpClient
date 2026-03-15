@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const protocolBadge = document.getElementById('protocolBadge');
     const responseTimeText = document.getElementById('responseTime');
     const redirectChainDiv = document.getElementById('redirectChain');
+    const tlsPanelDiv = document.getElementById('tlsPanel');
     const stacktraceArea = document.getElementById('stacktraceArea');
     const toggleStackBtn = document.getElementById('toggleStackBtn');
 
@@ -83,6 +84,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             updateResponseMetadata(response.status, duration, protocol, resolvedIp);
             renderRedirectChain(redirectChainHeader);
+            if (payload.url.startsWith('https://')) fetchAndRenderTls(payload.url);
             addToHistory(payload, response.status, duration, data);
 
             if (response.status === 502 && data.includes("---STACKTRACE---")) {
@@ -132,6 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
         stacktraceArea.style.display = 'none';
         if (toggleStackBtn) toggleStackBtn.textContent = 'Stacktrace Details';
         if (redirectChainDiv) redirectChainDiv.style.display = 'none';
+        if (tlsPanelDiv) tlsPanelDiv.style.display = 'none';
     }
 
     function renderRedirectChain(chainHeader) {
@@ -195,6 +198,83 @@ document.addEventListener('DOMContentLoaded', () => {
         stacktraceArea.innerText = stack.trim();
         // Sicherstellen, dass er beim Laden des Fehlers erstmal zu ist
         stacktraceArea.style.display = 'none';
+    }
+
+    async function fetchAndRenderTls(url) {
+        if (!tlsPanelDiv) return;
+        tlsPanelDiv.innerHTML = `<div class="border rounded p-2 bg-light x-small text-muted"><div class="spinner-border spinner-border-sm me-2"></div>TLS wird inspiziert...</div>`;
+        tlsPanelDiv.style.display = 'block';
+        try {
+            const res = await fetch(`/api/k8s/tls?url=${encodeURIComponent(url)}`);
+            const tls = await res.json();
+            tlsPanelDiv.innerHTML = renderTlsPanel(tls);
+        } catch (e) {
+            tlsPanelDiv.innerHTML = `<div class="border rounded p-2 bg-light x-small text-danger">TLS-Inspektion fehlgeschlagen: ${e.message}</div>`;
+        }
+    }
+
+    function renderTlsPanel(tls) {
+        if (tls.error) return `
+            <div class="border rounded p-2 bg-light">
+                <span class="x-small fw-bold text-uppercase text-muted"><i class="bi bi-shield-x me-1"></i>TLS</span>
+                <span class="ms-2 x-small text-danger">${tls.error}</span>
+            </div>`;
+
+        const mtlsBadge = tls.isMtls
+            ? `<span class="badge bg-success ms-1">mTLS / SPIFFE</span>`
+            : `<span class="badge bg-secondary ms-1">TLS</span>`;
+
+        const spiffeRow = tls.spiffeId ? `
+            <div class="mt-1 x-small">
+                <i class="bi bi-person-badge me-1 text-success"></i>
+                <code class="text-success">${tls.spiffeId}</code>
+            </div>` : '';
+
+        const chainHtml = (tls.chain ?? []).map((cert, i) => {
+            const expiredClass = cert.expired ? 'text-danger' : cert.daysUntilExpiry < 30 ? 'text-warning' : 'text-success';
+            const expiredIcon = cert.expired ? 'bi-x-circle-fill text-danger' : cert.daysUntilExpiry < 30 ? 'bi-exclamation-triangle-fill text-warning' : 'bi-check-circle-fill text-success';
+            const typeBadge = { leaf: 'bg-primary', intermediate: 'bg-secondary', root: 'bg-dark' }[cert.type] ?? 'bg-secondary';
+            const sans = (cert.subjectAltNames ?? []).map(s => {
+                const isSpiffe = s.startsWith('URI:spiffe://');
+                return `<span class="badge ${isSpiffe ? 'bg-success' : 'bg-light text-dark border'} font-monospace me-1 mb-1" style="font-size:0.65rem;">${s}</span>`;
+            }).join('');
+            const id = `tls-cert-${i}`;
+            return `
+            <div class="border rounded mb-1">
+                <button class="btn btn-sm w-100 text-start x-small d-flex justify-content-between align-items-center px-2 py-1"
+                        onclick="document.getElementById('${id}').classList.toggle('d-none')">
+                    <span>
+                        <span class="badge ${typeBadge} me-1">${cert.type}</span>
+                        <span class="font-monospace">${cert.subject.split(',')[0]}</span>
+                    </span>
+                    <span class="${expiredClass} x-small"><i class="bi ${expiredIcon} me-1"></i>${cert.expired ? 'ABGELAUFEN' : cert.daysUntilExpiry + 'd'}</span>
+                </button>
+                <div id="${id}" class="d-none px-2 pb-2 x-small">
+                    <table class="table table-sm table-borderless mb-1" style="font-size:0.7rem;">
+                        <tbody>
+                            <tr><td class="text-muted w-25">Subject</td><td class="font-monospace">${cert.subject}</td></tr>
+                            <tr><td class="text-muted">Issuer</td><td class="font-monospace">${cert.issuer}</td></tr>
+                            <tr><td class="text-muted">Serial</td><td class="font-monospace">${cert.serial}</td></tr>
+                            <tr><td class="text-muted">Gültig von</td><td>${cert.validFrom}</td></tr>
+                            <tr><td class="text-muted">Gültig bis</td><td class="${expiredClass}">${cert.validTo}</td></tr>
+                        </tbody>
+                    </table>
+                    ${sans ? `<div class="mb-1">${sans}</div>` : ''}
+                </div>
+            </div>`;
+        }).join('');
+
+        return `
+        <div class="border rounded p-2 bg-light">
+            <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
+                <span class="x-small fw-bold text-uppercase text-muted"><i class="bi bi-shield-lock me-1"></i>TLS</span>
+                <span class="badge bg-info text-dark">${tls.tlsVersion ?? ''}</span>
+                <span class="badge bg-light text-dark border font-monospace" style="font-size:0.65rem;">${tls.cipherSuite ?? ''}</span>
+                ${mtlsBadge}
+            </div>
+            ${spiffeRow}
+            <div class="mt-2">${chainHtml}</div>
+        </div>`;
     }
 
     function handleSuccess(data) {

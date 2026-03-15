@@ -1,6 +1,7 @@
 package com.wlanboy.javahttpclient.controller;
 
 import com.wlanboy.javahttpclient.client.K8sDiagnosticService;
+import com.wlanboy.javahttpclient.client.TlsInspectorService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -12,6 +13,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -20,9 +22,11 @@ import java.util.Map;
 public class DiagnosticController {
 
     private final K8sDiagnosticService k8sService;
+    private final TlsInspectorService tlsService;
 
-    public DiagnosticController(K8sDiagnosticService k8sService) {
+    public DiagnosticController(K8sDiagnosticService k8sService, TlsInspectorService tlsService) {
         this.k8sService = k8sService;
+        this.tlsService = tlsService;
     }
 
     /**
@@ -92,5 +96,16 @@ public class DiagnosticController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
+    }
+
+    @Operation(
+        summary = "TLS-Zertifikat inspizieren",
+        description = "Baut eine separate TLS-Verbindung zum Ziel auf und gibt Protokoll, Cipher Suite, Zertifikatskette und SPIFFE/mTLS-Informationen zurück."
+    )
+    @GetMapping("/tls")
+    public ResponseEntity<Map<String, Object>> inspectTls(
+            @Parameter(description = "Ziel-URL (muss https:// sein)", example = "https://example.com")
+            @RequestParam String url) {
+        return ResponseEntity.ok(tlsService.inspect(url));
     }
 }
