@@ -61,16 +61,28 @@ public class ClientService {
 			// DNS-Auflösung vor dem Request (diagnostisch)
 			String resolvedIps = resolveDns(currentUri.getHost());
 
-			// Erster Request mit HTTP/2, Fallback auf HTTP/1.1 bei Protocol-Fehler
+			// Erster Request mit HTTP/2, Fallback auf HTTP/1.1 bei Verbindungs- oder Protokollfehler
 			record RequestResult(HttpClient activeClient, HttpResponse<String> response, boolean usedFallback) {}
 			RequestResult initial;
 			try {
-				initial = new RequestResult(client,
-						client.send(buildRequest(currentUri, currentMethod, currentBody, requestData, incomingHeaders),
-								BodyHandlers.ofString()),
-						false);
+				HttpResponse<String> h2response = client.send(
+						buildRequest(currentUri, currentMethod, currentBody, requestData, incomingHeaders),
+						BodyHandlers.ofString());
+				// 502 mit Envoy-Protokollfehler → HTTP/2 wird vom Upstream nicht unterstützt
+				boolean isProtocolError = h2response.statusCode() == 502
+						&& h2response.body() != null
+						&& h2response.body().contains("protocol error");
+				if (isProtocolError) {
+					logger.warn("HTTP/2 502 protocol error, Fallback auf HTTP/1.1");
+					initial = new RequestResult(clientHttp11,
+							clientHttp11.send(buildRequest(currentUri, currentMethod, currentBody, requestData, incomingHeaders),
+									BodyHandlers.ofString()),
+							true);
+				} else {
+					initial = new RequestResult(client, h2response, false);
+				}
 			} catch (IOException e) {
-				logger.warn("HTTP/2 fehlgeschlagen ({}), Fallback auf HTTP/1.1", e.getMessage());
+				logger.warn("HTTP/2 Verbindungsfehler ({}), Fallback auf HTTP/1.1", e.getMessage());
 				initial = new RequestResult(clientHttp11,
 						clientHttp11.send(buildRequest(currentUri, currentMethod, currentBody, requestData, incomingHeaders),
 								BodyHandlers.ofString()),
