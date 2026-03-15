@@ -25,7 +25,7 @@ class ClientServiceTest {
     static void startServer() throws IOException {
         server = HttpServer.create(new InetSocketAddress(0), 0);
         port = server.getAddress().getPort();
-        server.setExecutor(Executors.newFixedThreadPool(2));
+        server.setExecutor(Executors.newFixedThreadPool(4));
 
         // GET endpoint
         server.createContext("/get", exchange -> {
@@ -75,6 +75,50 @@ class ClientServiceTest {
             try (OutputStream os = exchange.getResponseBody()) {
                 os.write(response.getBytes());
             }
+        });
+
+        // Redirect endpoints
+        server.createContext("/redirect/301", exchange -> {
+            exchange.getResponseHeaders().set("Location", "/get");
+            exchange.sendResponseHeaders(301, -1);
+            exchange.getResponseBody().close();
+        });
+
+        server.createContext("/redirect/302", exchange -> {
+            exchange.getResponseHeaders().set("Location", "/get");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.getResponseBody().close();
+        });
+
+        server.createContext("/redirect/303", exchange -> {
+            exchange.getResponseHeaders().set("Location", "/get");
+            exchange.sendResponseHeaders(303, -1);
+            exchange.getResponseBody().close();
+        });
+
+        server.createContext("/redirect/307", exchange -> {
+            exchange.getResponseHeaders().set("Location", "/post");
+            exchange.sendResponseHeaders(307, -1);
+            exchange.getResponseBody().close();
+        });
+
+        server.createContext("/redirect/308", exchange -> {
+            exchange.getResponseHeaders().set("Location", "/post");
+            exchange.sendResponseHeaders(308, -1);
+            exchange.getResponseBody().close();
+        });
+
+        server.createContext("/redirect/circular", exchange -> {
+            exchange.getResponseHeaders().set("Location", "/redirect/circular");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.getResponseBody().close();
+        });
+
+        // /redirect/chain → 301 → /redirect/302 → 302 → /get
+        server.createContext("/redirect/chain", exchange -> {
+            exchange.getResponseHeaders().set("Location", "/redirect/302");
+            exchange.sendResponseHeaders(301, -1);
+            exchange.getResponseBody().close();
         });
 
         server.start();
@@ -330,5 +374,224 @@ class ClientServiceTest {
             ResponseEntity<String> response = clientService.sendRequest(request, new HttpHeaders());
             assertNotNull(response);
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Redirect tests
+    // -------------------------------------------------------------------------
+
+    @Test
+    void sendRequest_with301Redirect_followsRedirect() {
+        JavaHttpRequest request = new JavaHttpRequest(
+                baseUrl() + "/redirect/301",
+                HttpMethod.GET,
+                null,
+                null,
+                false,
+                null
+        );
+
+        ResponseEntity<String> response = clientService.sendRequest(request, new HttpHeaders());
+
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals("GET Success", response.getBody());
+
+        // The redirect chain header must be present and mention status 301
+        String chain = response.getHeaders().getFirst("X-Redirect-Chain");
+        assertNotNull(chain, "X-Redirect-Chain header should be present after a redirect");
+        assertTrue(chain.contains("\"status\":301"),
+                "Redirect chain should contain a step with status 301, got: " + chain);
+    }
+
+    @Test
+    void sendRequest_with302Redirect_followsRedirect() {
+        JavaHttpRequest request = new JavaHttpRequest(
+                baseUrl() + "/redirect/302",
+                HttpMethod.GET,
+                null,
+                null,
+                false,
+                null
+        );
+
+        ResponseEntity<String> response = clientService.sendRequest(request, new HttpHeaders());
+
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals("GET Success", response.getBody());
+
+        String chain = response.getHeaders().getFirst("X-Redirect-Chain");
+        assertNotNull(chain, "X-Redirect-Chain header should be present after a redirect");
+        assertTrue(chain.contains("\"status\":302"),
+                "Redirect chain should contain a step with status 302, got: " + chain);
+    }
+
+    @Test
+    void sendRequest_with303Redirect_fromPost_becomeGet() {
+        // POST to a 303 redirect; the 303 spec mandates the follow-up is always GET
+        JavaHttpRequest request = new JavaHttpRequest(
+                baseUrl() + "/redirect/303",
+                HttpMethod.POST,
+                "{\"data\":\"value\"}",
+                "application/json",
+                false,
+                null
+        );
+
+        ResponseEntity<String> response = clientService.sendRequest(request, new HttpHeaders());
+
+        // Final destination is /get which returns "GET Success"
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals("GET Success", response.getBody());
+
+        String chain = response.getHeaders().getFirst("X-Redirect-Chain");
+        assertNotNull(chain, "X-Redirect-Chain header should be present after a 303 redirect");
+        assertTrue(chain.contains("\"status\":303"),
+                "Redirect chain should contain a step with status 303, got: " + chain);
+    }
+
+    @Test
+    void sendRequest_with307Redirect_keepsPOSTMethod() {
+        // 307 must keep the original method (POST) and body
+        JavaHttpRequest request = new JavaHttpRequest(
+                baseUrl() + "/redirect/307",
+                HttpMethod.POST,
+                "hello-body",
+                "text/plain",
+                false,
+                null
+        );
+
+        ResponseEntity<String> response = clientService.sendRequest(request, new HttpHeaders());
+
+        // Final destination is /post which echoes the body
+        assertEquals(200, response.getStatusCode().value());
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody().contains("Received: hello-body"),
+                "307 redirect must preserve the POST body, got: " + response.getBody());
+
+        String chain = response.getHeaders().getFirst("X-Redirect-Chain");
+        assertNotNull(chain, "X-Redirect-Chain header should be present after a 307 redirect");
+        assertTrue(chain.contains("\"status\":307"),
+                "Redirect chain should contain a step with status 307, got: " + chain);
+    }
+
+    @Test
+    void sendRequest_withRedirectChain_capturesAllHops() {
+        // /redirect/chain → 301 → /redirect/302 → 302 → /get (2 hops total)
+        JavaHttpRequest request = new JavaHttpRequest(
+                baseUrl() + "/redirect/chain",
+                HttpMethod.GET,
+                null,
+                null,
+                false,
+                null
+        );
+
+        ResponseEntity<String> response = clientService.sendRequest(request, new HttpHeaders());
+
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals("GET Success", response.getBody());
+
+        String chain = response.getHeaders().getFirst("X-Redirect-Chain");
+        assertNotNull(chain, "X-Redirect-Chain header should be present after a redirect chain");
+
+        // Two redirect steps must appear – count occurrences of "\"status\":"
+        long hopCount = chain.chars()
+                .filter(c -> c == '{')
+                .count();
+        assertEquals(2, hopCount,
+                "Redirect chain should capture exactly 2 hops for /redirect/chain, got chain: " + chain);
+    }
+
+    @Test
+    void sendRequest_withCircularRedirect_stopsAtMaxRedirects() {
+        // /redirect/circular points back to itself – ClientService must stop after MAX_REDIRECTS
+        JavaHttpRequest request = new JavaHttpRequest(
+                baseUrl() + "/redirect/circular",
+                HttpMethod.GET,
+                null,
+                null,
+                false,
+                null
+        );
+
+        // Must not throw and must return a response within a reasonable time
+        ResponseEntity<String> response = assertDoesNotThrow(
+                () -> clientService.sendRequest(request, new HttpHeaders()),
+                "Circular redirect must not cause an infinite loop or exception"
+        );
+
+        assertNotNull(response, "Response must not be null for circular redirect");
+        // After MAX_REDIRECTS the service returns whatever the last response was (another 302)
+        // or a 502 – either way it must be a valid HTTP status code
+        assertTrue(response.getStatusCode().value() >= 100 && response.getStatusCode().value() < 600,
+                "Response status must be a valid HTTP status code, got: " + response.getStatusCode().value());
+    }
+
+    // -------------------------------------------------------------------------
+    // Diagnostic header tests
+    // -------------------------------------------------------------------------
+
+    @Test
+    void sendRequest_success_hasProtocolVersionHeader() {
+        JavaHttpRequest request = new JavaHttpRequest(
+                baseUrl() + "/get",
+                HttpMethod.GET,
+                null,
+                null,
+                false,
+                null
+        );
+
+        ResponseEntity<String> response = clientService.sendRequest(request, new HttpHeaders());
+
+        assertEquals(200, response.getStatusCode().value());
+        String protocolVersion = response.getHeaders().getFirst("X-Protocol-Version");
+        assertNotNull(protocolVersion, "X-Protocol-Version header must be present");
+        // The embedded test server only speaks HTTP/1.1; the Java HttpClient may
+        // negotiate HTTP/2 but will fall back to HTTP/1.1 for plain HTTP.
+        assertTrue(
+                protocolVersion.equals("HTTP/1.1") || protocolVersion.equals("HTTP/2"),
+                "X-Protocol-Version must be HTTP/1.1 or HTTP/2, got: " + protocolVersion
+        );
+    }
+
+    @Test
+    void sendRequest_success_hasResolvedIpHeader() {
+        JavaHttpRequest request = new JavaHttpRequest(
+                baseUrl() + "/get",
+                HttpMethod.GET,
+                null,
+                null,
+                false,
+                null
+        );
+
+        ResponseEntity<String> response = clientService.sendRequest(request, new HttpHeaders());
+
+        assertEquals(200, response.getStatusCode().value());
+        String resolvedIp = response.getHeaders().getFirst("X-Resolved-IP");
+        assertNotNull(resolvedIp, "X-Resolved-IP header must be present when targeting localhost");
+        assertFalse(resolvedIp.isBlank(), "X-Resolved-IP header must not be empty");
+    }
+
+    @Test
+    void sendRequest_withNoRedirect_hasNoRedirectChainHeader() {
+        JavaHttpRequest request = new JavaHttpRequest(
+                baseUrl() + "/get",
+                HttpMethod.GET,
+                null,
+                null,
+                false,
+                null
+        );
+
+        ResponseEntity<String> response = clientService.sendRequest(request, new HttpHeaders());
+
+        assertEquals(200, response.getStatusCode().value());
+        assertNull(
+                response.getHeaders().getFirst("X-Redirect-Chain"),
+                "X-Redirect-Chain header must NOT be present when no redirect occurred"
+        );
     }
 }

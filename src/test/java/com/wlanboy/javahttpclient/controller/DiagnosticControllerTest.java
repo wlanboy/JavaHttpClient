@@ -1,6 +1,7 @@
 package com.wlanboy.javahttpclient.controller;
 
 import com.wlanboy.javahttpclient.client.K8sDiagnosticService;
+import com.wlanboy.javahttpclient.client.TlsInspectorService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -18,6 +19,9 @@ class DiagnosticControllerTest {
 
     @Mock
     private K8sDiagnosticService k8sService;
+
+    @Mock
+    private TlsInspectorService tlsService;
 
     @InjectMocks
     private DiagnosticController controller;
@@ -188,5 +192,140 @@ class DiagnosticControllerTest {
 
             verify(k8sService).getIstioResources(namespace, "virtualservices");
         }
+    }
+
+    // =========================================================================
+    // correlateUrl tests
+    // =========================================================================
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void correlateUrl_withMatchingResources_returnsCorrelationResult() {
+        Map<String, Object> correlationResult = new LinkedHashMap<>();
+        correlationResult.put("hasMatch", true);
+        correlationResult.put("requestedHost", "my-svc");
+        correlationResult.put("requestedPath", "/api");
+        correlationResult.put("matchedVirtualServices",
+                List.of(Map.of("name", "my-vs", "hostMatch", true)));
+        correlationResult.put("matchedDestinationRules", List.of());
+        correlationResult.put("matchedServiceEntries", List.of());
+
+        when(k8sService.correlateUrl("http://my-svc/api", "default")).thenReturn(correlationResult);
+
+        ResponseEntity<Map<String, Object>> response = controller.correlateUrl("http://my-svc/api", "default");
+
+        assertEquals(200, response.getStatusCode().value());
+        assertNotNull(response.getBody());
+        assertEquals(true, response.getBody().get("hasMatch"));
+        List<Object> matchedVs = (List<Object>) response.getBody().get("matchedVirtualServices");
+        assertNotNull(matchedVs);
+        assertEquals(1, matchedVs.size());
+        verify(k8sService).correlateUrl("http://my-svc/api", "default");
+    }
+
+    @Test
+    void correlateUrl_withNoMatch_returnsHasMatchFalse() {
+        Map<String, Object> correlationResult = new LinkedHashMap<>();
+        correlationResult.put("hasMatch", false);
+        correlationResult.put("requestedHost", "unknown-svc");
+        correlationResult.put("requestedPath", "/");
+        correlationResult.put("matchedVirtualServices", List.of());
+        correlationResult.put("matchedDestinationRules", List.of());
+        correlationResult.put("matchedServiceEntries", List.of());
+
+        when(k8sService.correlateUrl("http://unknown-svc/", "default")).thenReturn(correlationResult);
+
+        ResponseEntity<Map<String, Object>> response = controller.correlateUrl("http://unknown-svc/", "default");
+
+        assertEquals(200, response.getStatusCode().value());
+        assertNotNull(response.getBody());
+        assertEquals(false, response.getBody().get("hasMatch"));
+    }
+
+    @Test
+    void correlateUrl_withError_returnsOkWithError() {
+        Map<String, Object> correlationResult = new HashMap<>();
+        correlationResult.put("error", "Malformed URL");
+
+        when(k8sService.correlateUrl("not-a-url", "default")).thenReturn(correlationResult);
+
+        ResponseEntity<Map<String, Object>> response = controller.correlateUrl("not-a-url", "default");
+
+        assertEquals(200, response.getStatusCode().value());
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody().containsKey("error"));
+        assertEquals("Malformed URL", response.getBody().get("error"));
+    }
+
+    // =========================================================================
+    // inspectTls tests
+    // =========================================================================
+
+    @Test
+    void inspectTls_withHttpsUrl_returnsTlsInfo() {
+        Map<String, Object> tlsResult = new LinkedHashMap<>();
+        tlsResult.put("host", "example.com");
+        tlsResult.put("port", 443);
+        tlsResult.put("tlsVersion", "TLSv1.3");
+        tlsResult.put("cipherSuite", "TLS_AES_256_GCM_SHA384");
+        tlsResult.put("isMtls", false);
+        tlsResult.put("chain", List.of(
+                Map.of("index", 0, "type", "leaf", "subject", "CN=example.com")
+        ));
+
+        when(tlsService.inspect("https://example.com")).thenReturn(tlsResult);
+
+        ResponseEntity<Map<String, Object>> response = controller.inspectTls("https://example.com");
+
+        assertEquals(200, response.getStatusCode().value());
+        assertNotNull(response.getBody());
+        assertEquals("TLSv1.3", response.getBody().get("tlsVersion"));
+        assertEquals("TLS_AES_256_GCM_SHA384", response.getBody().get("cipherSuite"));
+        assertEquals(false, response.getBody().get("isMtls"));
+        assertNotNull(response.getBody().get("chain"));
+        verify(tlsService).inspect("https://example.com");
+    }
+
+    @Test
+    void inspectTls_withHttpUrl_returnsError() {
+        Map<String, Object> tlsResult = new LinkedHashMap<>();
+        tlsResult.put("error", "Kein HTTPS – TLS-Inspektion nicht möglich.");
+
+        when(tlsService.inspect("http://example.com")).thenReturn(tlsResult);
+
+        ResponseEntity<Map<String, Object>> response = controller.inspectTls("http://example.com");
+
+        assertEquals(200, response.getStatusCode().value());
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody().containsKey("error"));
+        assertTrue(response.getBody().get("error").toString().contains("Kein HTTPS"));
+    }
+
+    @Test
+    void inspectTls_withMtlsCert_returnsSpiffeId() {
+        String spiffeId = "spiffe://cluster.local/ns/default/sa/mysa";
+        Map<String, Object> tlsResult = new LinkedHashMap<>();
+        tlsResult.put("host", "my-svc.default.svc.cluster.local");
+        tlsResult.put("port", 443);
+        tlsResult.put("tlsVersion", "TLSv1.3");
+        tlsResult.put("cipherSuite", "TLS_AES_128_GCM_SHA256");
+        tlsResult.put("isMtls", true);
+        tlsResult.put("spiffeId", spiffeId);
+        tlsResult.put("chain", List.of(
+                Map.of("index", 0, "type", "leaf",
+                        "subject", "O=cluster.local",
+                        "subjectAltNames", List.of("URI:" + spiffeId))
+        ));
+
+        when(tlsService.inspect("https://my-svc.default.svc.cluster.local"))
+                .thenReturn(tlsResult);
+
+        ResponseEntity<Map<String, Object>> response =
+                controller.inspectTls("https://my-svc.default.svc.cluster.local");
+
+        assertEquals(200, response.getStatusCode().value());
+        assertNotNull(response.getBody());
+        assertEquals(true, response.getBody().get("isMtls"));
+        assertEquals(spiffeId, response.getBody().get("spiffeId"));
     }
 }
