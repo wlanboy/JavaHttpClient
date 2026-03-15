@@ -30,7 +30,7 @@ public class ClientService {
 
 	public ClientService() {
 		client = HttpClient.newBuilder()
-				.version(Version.HTTP_1_1)
+				.version(Version.HTTP_2)
 				.followRedirects(Redirect.NORMAL)
 				.connectTimeout(Duration.ofSeconds(10))
 				.build();
@@ -80,8 +80,13 @@ public class ClientService {
 			HttpHeaders responseHeaders = new HttpHeaders();
 			response.headers().map().forEach(responseHeaders::addAll);
 
+			String protocolVersion = response.version() == Version.HTTP_2 ? "HTTP/2" : "HTTP/1.1";
+
 			return ResponseEntity.status(response.statusCode())
-					.headers(h -> h.addAll(responseHeaders))
+					.headers(h -> {
+						h.addAll(responseHeaders);
+						h.set("X-Protocol-Version", protocolVersion);
+					})
 					.body(response.body());
 
 		} catch (Exception e) {

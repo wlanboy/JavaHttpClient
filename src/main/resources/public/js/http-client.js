@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const responseOutput = document.getElementById('responseOutput');
     const errorBox = document.getElementById('errorBox');
     const statusBadge = document.getElementById('statusBadge');
+    const protocolBadge = document.getElementById('protocolBadge');
     const responseTimeText = document.getElementById('responseTime');
     const stacktraceArea = document.getElementById('stacktraceArea');
     const toggleStackBtn = document.getElementById('toggleStackBtn');
@@ -75,8 +76,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const duration = Date.now() - startTime;
             const data = await response.text();
+            const protocol = response.headers.get('x-protocol-version') ?? '';
 
-            updateResponseMetadata(response.status, duration);
+            updateResponseMetadata(response.status, duration, protocol);
             addToHistory(payload, response.status, duration, data);
 
             if (response.status === 502 && data.includes("---STACKTRACE---")) {
@@ -127,10 +129,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (toggleStackBtn) toggleStackBtn.textContent = 'Stacktrace Details';
     }
 
-    function updateResponseMetadata(status, duration) {
+    function updateResponseMetadata(status, duration, protocol = '') {
         statusBadge.innerText = `HTTP ${status}`;
         statusBadge.className = `badge p-2 ${status >= 200 && status < 300 ? 'bg-success' : 'bg-danger'}`;
         responseTimeText.innerText = `Dauer: ${duration}ms`;
+        if (protocol && protocolBadge) {
+            protocolBadge.innerText = protocol;
+            protocolBadge.className = `badge ms-2 shadow-sm ${protocol === 'HTTP/2' ? 'bg-primary' : 'bg-secondary'}`;
+            protocolBadge.style.display = '';
+        }
     }
 
     function handleDetailedError(data) {
