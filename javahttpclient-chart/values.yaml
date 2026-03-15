@@ -35,3 +35,7 @@ certManager:
   dnsNames:
     - javahttpclient.tp.lan
     - javahttpclient.gmk.lan
+
+extraVolumeMounts: []
+extraVolumes: []
+extraEnv: []
