@@ -10,6 +10,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.slf4j.Logger;
@@ -26,66 +30,69 @@ public class ClientService {
 	private static final Set<String> BAD_HEADERS = Set.of(
 			"host", "content-length", "connection", "accept-encoding", "upgrade"
 	);
+	private static final Set<Integer> REDIRECT_CODES = Set.of(301, 302, 303, 307, 308);
+	private static final int MAX_REDIRECTS = 10;
+
 	private final HttpClient client;
 
 	public ClientService() {
 		client = HttpClient.newBuilder()
 				.version(Version.HTTP_2)
-				.followRedirects(Redirect.NORMAL)
+				.followRedirects(Redirect.NEVER)
 				.connectTimeout(Duration.ofSeconds(10))
 				.build();
 	}
 
 	public ResponseEntity<String> sendRequest(JavaHttpRequest requestData, HttpHeaders incomingHeaders) {
 		try {
-			boolean hasBody = requestData.body() != null && !requestData.body().isBlank();
+			List<Map<String, Object>> redirectChain = new ArrayList<>();
+			URI currentUri = URI.create(requestData.url());
+			String currentMethod = requestData.method().name();
+			String currentBody = requestData.body();
 
-			HttpRequest.BodyPublisher bodyPublisher = hasBody
-					? HttpRequest.BodyPublishers.ofString(requestData.body())
-					: HttpRequest.BodyPublishers.noBody();
+			// Erster Request mit allen Headern
+			HttpResponse<String> response = client.send(
+					buildRequest(currentUri, currentMethod, currentBody, requestData, incomingHeaders),
+					BodyHandlers.ofString());
 
-			HttpRequest.Builder builder = HttpRequest.newBuilder()
-					.uri(URI.create(requestData.url()))
-					.timeout(Duration.ofSeconds(30))
-					.method(requestData.method().name(), bodyPublisher);
+			// Redirects manuell verfolgen
+			while (REDIRECT_CODES.contains(response.statusCode()) && redirectChain.size() < MAX_REDIRECTS) {
+				String location = response.headers().firstValue("location").orElse(null);
+				if (location == null) break;
 
-			if (hasBody && requestData.contentType() != null && !requestData.contentType().isBlank()) {
-				builder.header("Content-Type", requestData.contentType());
-			} else if (hasBody) {
-				builder.header("Content-Type", "application/json");
+				URI nextUri = currentUri.resolve(location);
+
+				Map<String, Object> step = new LinkedHashMap<>();
+				step.put("from", currentUri.toString());
+				step.put("status", response.statusCode());
+				step.put("to", nextUri.toString());
+				step.put("proto", response.version() == Version.HTTP_2 ? "HTTP/2" : "HTTP/1.1");
+				redirectChain.add(step);
+
+				currentUri = nextUri;
+				// 307/308: Methode + Body beibehalten; alle anderen → GET ohne Body
+				if (response.statusCode() != 307 && response.statusCode() != 308) {
+					currentMethod = "GET";
+					currentBody = null;
+				}
+
+				// Folge-Requests ohne originale Browser-Header (kein Auth-Leak)
+				response = client.send(
+						buildRequest(currentUri, currentMethod, currentBody, null, null),
+						BodyHandlers.ofString());
 			}
-
-			if (requestData.copyHeaders() && incomingHeaders != null) {
-				incomingHeaders.forEach((key, value) -> {
-					if (!BAD_HEADERS.contains(key.toLowerCase()) && !value.isEmpty()) {
-						try {
-							builder.header(key, value.get(0));
-						} catch (IllegalArgumentException e) {
-							logger.warn("Header {} ist geschützt und wurde übersprungen", key);
-						}
-					}
-				});
-			}
-
-			if (requestData.customHeaders() != null) {
-				requestData.customHeaders().forEach((key, value) -> {
-					if (key != null && !key.isBlank() && !BAD_HEADERS.contains(key.toLowerCase())) {
-						builder.header(key, value);
-					}
-				});
-			}
-
-			HttpResponse<String> response = client.send(builder.build(), BodyHandlers.ofString());
 
 			HttpHeaders responseHeaders = new HttpHeaders();
 			response.headers().map().forEach(responseHeaders::addAll);
-
 			String protocolVersion = response.version() == Version.HTTP_2 ? "HTTP/2" : "HTTP/1.1";
 
 			return ResponseEntity.status(response.statusCode())
 					.headers(h -> {
 						h.addAll(responseHeaders);
 						h.set("X-Protocol-Version", protocolVersion);
+						if (!redirectChain.isEmpty()) {
+							h.set("X-Redirect-Chain", serializeChain(redirectChain));
+						}
 					})
 					.body(response.body());
 
@@ -103,11 +110,72 @@ public class ClientService {
 		}
 	}
 
+	private HttpRequest buildRequest(URI uri, String method, String body,
+			JavaHttpRequest requestData, HttpHeaders incomingHeaders) {
+
+		boolean hasBody = body != null && !body.isBlank()
+				&& !method.equals("GET") && !method.equals("HEAD") && !method.equals("OPTIONS");
+
+		HttpRequest.BodyPublisher bodyPublisher = hasBody
+				? HttpRequest.BodyPublishers.ofString(body)
+				: HttpRequest.BodyPublishers.noBody();
+
+		HttpRequest.Builder builder = HttpRequest.newBuilder()
+				.uri(uri)
+				.timeout(Duration.ofSeconds(30))
+				.method(method, bodyPublisher);
+
+		if (hasBody && requestData != null) {
+			String ct = requestData.contentType();
+			builder.header("Content-Type", ct != null && !ct.isBlank() ? ct : "application/json");
+		}
+
+		if (requestData != null && requestData.copyHeaders() && incomingHeaders != null) {
+			incomingHeaders.forEach((key, value) -> {
+				if (!BAD_HEADERS.contains(key.toLowerCase()) && !value.isEmpty()) {
+					try {
+						builder.header(key, value.get(0));
+					} catch (IllegalArgumentException e) {
+						logger.warn("Header {} ist geschützt und wurde übersprungen", key);
+					}
+				}
+			});
+		}
+
+		if (requestData != null && requestData.customHeaders() != null) {
+			requestData.customHeaders().forEach((key, value) -> {
+				if (key != null && !key.isBlank() && !BAD_HEADERS.contains(key.toLowerCase())) {
+					builder.header(key, value);
+				}
+			});
+		}
+
+		return builder.build();
+	}
+
+	private String serializeChain(List<Map<String, Object>> chain) {
+		StringBuilder sb = new StringBuilder("[");
+		for (int i = 0; i < chain.size(); i++) {
+			if (i > 0) sb.append(",");
+			Map<String, Object> step = chain.get(i);
+			sb.append("{")
+					.append("\"from\":\"").append(escapeJson(step.get("from").toString())).append("\",")
+					.append("\"status\":").append(step.get("status")).append(",")
+					.append("\"to\":\"").append(escapeJson(step.get("to").toString())).append("\",")
+					.append("\"proto\":\"").append(step.get("proto")).append("\"")
+					.append("}");
+		}
+		return sb.append("]").toString();
+	}
+
+	private String escapeJson(String s) {
+		return s.replace("\\", "\\\\").replace("\"", "\\\"");
+	}
+
 	private String formatErrorResponse(Exception e) {
 		String summary = "Unbekannter Fehler";
 		String detail = e.getMessage() != null ? e.getMessage() : "Keine Nachricht";
 
-		// Spezifische K8s/Netzwerk-Szenarien
 		if (e instanceof java.net.UnknownHostException) {
 			summary = "DNS Fehler: Host nicht gefunden. (Service-Name korrekt? Namespace vergessen?)";
 		} else if (e instanceof java.net.ConnectException) {

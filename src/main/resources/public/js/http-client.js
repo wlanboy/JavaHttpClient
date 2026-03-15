@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusBadge = document.getElementById('statusBadge');
     const protocolBadge = document.getElementById('protocolBadge');
     const responseTimeText = document.getElementById('responseTime');
+    const redirectChainDiv = document.getElementById('redirectChain');
     const stacktraceArea = document.getElementById('stacktraceArea');
     const toggleStackBtn = document.getElementById('toggleStackBtn');
 
@@ -77,8 +78,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const duration = Date.now() - startTime;
             const data = await response.text();
             const protocol = response.headers.get('x-protocol-version') ?? '';
+            const redirectChainHeader = response.headers.get('x-redirect-chain');
 
             updateResponseMetadata(response.status, duration, protocol);
+            renderRedirectChain(redirectChainHeader);
             addToHistory(payload, response.status, duration, data);
 
             if (response.status === 502 && data.includes("---STACKTRACE---")) {
@@ -127,6 +130,37 @@ document.addEventListener('DOMContentLoaded', () => {
         responseOutput.innerText = "Sende Request an Cluster...";
         stacktraceArea.style.display = 'none';
         if (toggleStackBtn) toggleStackBtn.textContent = 'Stacktrace Details';
+        if (redirectChainDiv) redirectChainDiv.style.display = 'none';
+    }
+
+    function renderRedirectChain(chainHeader) {
+        if (!redirectChainDiv) return;
+        if (!chainHeader) { redirectChainDiv.style.display = 'none'; return; }
+
+        let steps;
+        try { steps = JSON.parse(chainHeader); } catch (_) { return; }
+        if (!steps.length) { redirectChainDiv.style.display = 'none'; return; }
+
+        const statusColor = (s) => s < 400 ? 'bg-warning text-dark' : 'bg-danger';
+
+        const stepsHtml = steps.map((step, i) => `
+            <div class="d-flex align-items-center flex-wrap gap-1">
+                ${i === 0 ? `<span class="badge bg-dark font-monospace x-small text-truncate" style="max-width:220px;" title="${step.from}">${step.from}</span>` : ''}
+                <i class="bi bi-arrow-right text-muted"></i>
+                <span class="badge ${statusColor(step.status)}">${step.status}</span>
+                <span class="badge bg-secondary x-small">${step.proto}</span>
+                <i class="bi bi-arrow-right text-muted"></i>
+                <span class="badge bg-dark font-monospace x-small text-truncate" style="max-width:220px;" title="${step.to}">${step.to}</span>
+            </div>`).join('<div class="my-1"></div>');
+
+        redirectChainDiv.innerHTML = `
+            <div class="border rounded p-2 bg-light">
+                <div class="x-small fw-bold text-uppercase text-muted mb-2">
+                    <i class="bi bi-signpost-split me-1"></i>Redirect-Chain (${steps.length} Hop${steps.length > 1 ? 's' : ''})
+                </div>
+                ${stepsHtml}
+            </div>`;
+        redirectChainDiv.style.display = 'block';
     }
 
     function updateResponseMetadata(status, duration, protocol = '') {
