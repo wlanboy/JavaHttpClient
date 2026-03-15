@@ -2,6 +2,7 @@ package com.wlanboy.javahttpclient.client;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpClient.Redirect;
@@ -50,6 +51,9 @@ public class ClientService {
 			String currentMethod = requestData.method().name();
 			String currentBody = requestData.body();
 
+			// DNS-Auflösung vor dem Request (diagnostisch)
+			String resolvedIps = resolveDns(currentUri.getHost());
+
 			// Erster Request mit allen Headern
 			HttpResponse<String> response = client.send(
 					buildRequest(currentUri, currentMethod, currentBody, requestData, incomingHeaders),
@@ -90,6 +94,7 @@ public class ClientService {
 					.headers(h -> {
 						h.addAll(responseHeaders);
 						h.set("X-Protocol-Version", protocolVersion);
+						if (resolvedIps != null) h.set("X-Resolved-IP", resolvedIps);
 						if (!redirectChain.isEmpty()) {
 							h.set("X-Redirect-Chain", serializeChain(redirectChain));
 						}
@@ -151,6 +156,19 @@ public class ClientService {
 		}
 
 		return builder.build();
+	}
+
+	private String resolveDns(String hostname) {
+		if (hostname == null || hostname.isBlank()) return null;
+		try {
+			InetAddress[] addresses = InetAddress.getAllByName(hostname);
+			return java.util.Arrays.stream(addresses)
+					.map(InetAddress::getHostAddress)
+					.distinct()
+					.collect(java.util.stream.Collectors.joining(", "));
+		} catch (Exception e) {
+			return null;
+		}
 	}
 
 	private String serializeChain(List<Map<String, Object>> chain) {

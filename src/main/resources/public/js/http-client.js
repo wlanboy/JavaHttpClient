@@ -78,9 +78,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const duration = Date.now() - startTime;
             const data = await response.text();
             const protocol = response.headers.get('x-protocol-version') ?? '';
+            const resolvedIp = response.headers.get('x-resolved-ip') ?? '';
             const redirectChainHeader = response.headers.get('x-redirect-chain');
 
-            updateResponseMetadata(response.status, duration, protocol);
+            updateResponseMetadata(response.status, duration, protocol, resolvedIp);
             renderRedirectChain(redirectChainHeader);
             addToHistory(payload, response.status, duration, data);
 
@@ -163,7 +164,7 @@ document.addEventListener('DOMContentLoaded', () => {
         redirectChainDiv.style.display = 'block';
     }
 
-    function updateResponseMetadata(status, duration, protocol = '') {
+    function updateResponseMetadata(status, duration, protocol = '', resolvedIp = '') {
         statusBadge.innerText = `HTTP ${status}`;
         statusBadge.className = `badge p-2 ${status >= 200 && status < 300 ? 'bg-success' : 'bg-danger'}`;
         responseTimeText.innerText = `Dauer: ${duration}ms`;
@@ -171,6 +172,15 @@ document.addEventListener('DOMContentLoaded', () => {
             protocolBadge.innerText = protocol;
             protocolBadge.className = `badge ms-2 shadow-sm ${protocol === 'HTTP/2' ? 'bg-primary' : 'bg-secondary'}`;
             protocolBadge.style.display = '';
+        }
+        const ipBadge = document.getElementById('resolvedIpBadge');
+        if (ipBadge) {
+            if (resolvedIp) {
+                ipBadge.innerText = resolvedIp;
+                ipBadge.style.display = '';
+            } else {
+                ipBadge.style.display = 'none';
+            }
         }
     }
 
