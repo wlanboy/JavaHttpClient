@@ -110,11 +110,14 @@ public class K8sDiagnosticService {
             // Sektion B: Gesundheit & Fehler
             Map<String, Object> health = new HashMap<>();
             String rawStats = restTemplate.getForObject(
-                    envoyAdminUrl + "/stats?filter=.*(errors|5xx|timeout|retry|fail|reset|refused|overflow|pending|cx_none).*",
+                    envoyAdminUrl + "/stats",
                     String.class);
-            Map<String, String> activeErrors = parseStats(rawStats, true);
+            Map<String, String> activeErrors = parseStats(rawStats, false);
+            // xds-grpc ist interne Istio Control-Plane – kein App-Traffic, rausfiltern
+            activeErrors.entrySet().removeIf(e -> e.getKey().startsWith("cluster.xds-grpc"));
             health.put("activeErrorMetrics", activeErrors);
             health.put("errorCount", activeErrors.size());
+            health.put("diagnoses", diagnoseMetrics(activeErrors));
             report.put("healthDiagnostics", health);
 
             report.put("timestamp", new Date());
@@ -183,6 +186,57 @@ public class K8sDiagnosticService {
 
         logger.error("Keine Istio-Ressourcen für '{}' in allen Versionen {} gefunden.", type, ISTIO_VERSIONS);
         return Collections.emptyList();
+    }
+
+    private List<Map<String, Object>> diagnoseMetrics(Map<String, String> metrics) {
+        record Rule(String pattern, String severity, String title, String description, String recommendation) {}
+
+        List<Rule> rules = List.of(
+            new Rule("upstream_rq_pending_overflow", "KRITISCH", "Circuit Breaker / Pool-Overflow",
+                "Der Connection Pool ist voll oder ein Circuit Breaker ist offen.",
+                "DestinationRule.trafficPolicy.connectionPool und outlierDetection prüfen."),
+            new Rule("upstream_cx_none_healthy", "KRITISCH", "Keine gesunden Endpoints",
+                "Alle Upstream-Endpoints sind nicht erreichbar.",
+                "Pod-Status und Readiness-Probes prüfen. Envoy-Cluster-Health in Tab A ansehen."),
+            new Rule("upstream_cx_connect_fail", "KRITISCH", "Verbindung abgelehnt (Connection refused)",
+                "Envoy kann keine TCP-Verbindung zum Upstream aufbauen.",
+                "Prüfen: Pod läuft? Richtiger Port? NetworkPolicy blockiert? Service-Selector korrekt?"),
+            new Rule("upstream_rq_timeout", "WARNUNG", "Request Timeouts",
+                "Requests zum Upstream überschreiten das Timeout.",
+                "NetworkPolicy auf blockierte Ports prüfen. DestinationRule Timeout-Werte anpassen."),
+            new Rule("upstream_cx_connect_timeout", "WARNUNG", "Connection Timeout",
+                "Verbindungsaufbau zum Upstream schlägt fehl.",
+                "Pod läuft möglicherweise nicht oder Port ist falsch. NetworkPolicy prüfen."),
+            new Rule("upstream_rq_5xx", "WARNUNG", "5xx Fehler vom Upstream",
+                "Der Upstream-Service gibt 5xx-Statuscodes zurück.",
+                "Upstream-Logs prüfen. VirtualService-Routing und DestinationRule-Gewichtungen validieren."),
+            new Rule("upstream_rq_retry_limit_exceeded", "INFO", "Retry-Limit überschritten",
+                "Requests wurden mehrfach wiederholt und das Limit wurde erreicht.",
+                "VirtualService retryPolicy anpassen oder Upstream-Stabilität verbessern."),
+            new Rule("upstream_cx_destroy_remote_with_active_rq", "INFO", "Verbindung mit aktiven Requests abgebrochen",
+                "Die Remote-Seite hat die Verbindung während aktiver Requests getrennt.",
+                "Upstream Keep-Alive Konfiguration und Istio idle_timeout prüfen.")
+        );
+
+        List<Map<String, Object>> diagnoses = new ArrayList<>();
+        for (Rule rule : rules) {
+            List<String> matchingKeys = metrics.entrySet().stream()
+                .filter(e -> e.getKey().contains(rule.pattern()))
+                .map(Map.Entry::getKey)
+                .sorted()
+                .collect(java.util.stream.Collectors.toList());
+
+            if (!matchingKeys.isEmpty()) {
+                Map<String, Object> diagnosis = new LinkedHashMap<>();
+                diagnosis.put("severity", rule.severity());
+                diagnosis.put("title", rule.title());
+                diagnosis.put("description", rule.description());
+                diagnosis.put("recommendation", rule.recommendation());
+                diagnosis.put("affectedMetrics", matchingKeys);
+                diagnoses.add(diagnosis);
+            }
+        }
+        return diagnoses;
     }
 
     private String summarizeClusters(String rawClusters) {

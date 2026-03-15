@@ -59,22 +59,81 @@ const K8sClient = (() => {
     // Tab B: Fehler-Metriken
     // =========================================================================
 
-    function renderTabB(healthDiagnostics, errorDiv) {
+    function renderTabB(healthDiagnostics, errorDiv, targetUrl = '') {
         const errorEntries = Object.entries(healthDiagnostics?.activeErrorMetrics ?? {});
         const errorCount = healthDiagnostics?.errorCount ?? errorEntries.length;
+        const diagnoses = healthDiagnostics?.diagnoses ?? [];
 
-        errorDiv.innerHTML = errorEntries.length === 0
-            ? `<div class="alert alert-success small"><i class="bi bi-check-circle me-2"></i>Keine aktiven Fehler-Metriken.</div>`
-            : `<div class="mb-2"><span class="badge bg-danger">${errorCount} aktive Fehler</span></div>
-               <table class="table table-sm x-small">
-                   <thead><tr><th>Metrik</th><th>Wert</th></tr></thead>
-                   <tbody>${errorEntries.map(([k, v]) => `
-                       <tr>
-                           <td class="font-monospace text-truncate" style="max-width:300px;" title="${k}">${k}</td>
-                           <td class="fw-bold text-danger">${v}</td>
-                       </tr>`).join('')}
-                   </tbody>
-               </table>`;
+        // Hostname aus Ziel-URL extrahieren für Cluster-Korrelation
+        let targetHostname = '';
+        try { targetHostname = new URL(targetUrl).hostname.toLowerCase(); } catch (_) {}
+        const targetMetrics = targetHostname
+            ? errorEntries.filter(([k]) => k.toLowerCase().includes(targetHostname))
+            : [];
+        const targetHtml = targetHostname && targetMetrics.length > 0 ? `
+            <div class="alert alert-danger py-2 px-3 mb-2">
+                <div class="d-flex align-items-center mb-1">
+                    <i class="bi bi-crosshair me-2"></i>
+                    <span class="fw-bold small">ZIEL-KORRELATION – ${targetHostname}</span>
+                </div>
+                <p class="mb-1 x-small">Envoy-Metriken direkt für das Ziel-Cluster gefunden:</p>
+                <table class="table table-sm x-small mb-0">
+                    <tbody>${targetMetrics.map(([k, v]) => `
+                        <tr>
+                            <td class="font-monospace text-truncate" style="max-width:280px;" title="${k}">${k}</td>
+                            <td class="fw-bold text-danger">${v}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>` : '';
+
+        const severityConfig = {
+            'KRITISCH': { cls: 'danger',  icon: 'bi-exclamation-octagon-fill' },
+            'WARNUNG':  { cls: 'warning', icon: 'bi-exclamation-triangle-fill' },
+            'INFO':     { cls: 'info',    icon: 'bi-info-circle-fill' },
+        };
+
+        const diagnosisHtml = diagnoses.map(d => {
+            const cfg = severityConfig[d.severity] ?? { cls: 'secondary', icon: 'bi-question-circle' };
+            const metricsHtml = d.affectedMetrics.map(m =>
+                `<code class="d-block x-small text-truncate" style="max-width:100%;" title="${m}">${m}</code>`
+            ).join('');
+            return `
+            <div class="alert alert-${cfg.cls} py-2 px-3 mb-2">
+                <div class="d-flex align-items-center mb-1">
+                    <i class="bi ${cfg.icon} me-2"></i>
+                    <span class="fw-bold small">${d.severity} – ${d.title}</span>
+                </div>
+                <p class="mb-1 x-small">${d.description}</p>
+                <p class="mb-1 x-small"><strong>Empfehlung:</strong> ${d.recommendation}</p>
+                <details class="x-small mt-1">
+                    <summary class="text-muted" style="cursor:pointer;">Betroffene Metriken (${d.affectedMetrics.length})</summary>
+                    <div class="mt-1">${metricsHtml}</div>
+                </details>
+            </div>`;
+        }).join('');
+
+        const tableHtml = errorEntries.length === 0 ? '' : `
+            <div class="mt-3 mb-1 x-small fw-bold text-uppercase text-muted">Alle aktiven Fehler-Metriken</div>
+            <table class="table table-sm x-small">
+                <thead><tr><th>Metrik</th><th>Wert</th></tr></thead>
+                <tbody>${errorEntries.map(([k, v]) => `
+                    <tr>
+                        <td class="font-monospace text-truncate" style="max-width:300px;" title="${k}">${k}</td>
+                        <td class="fw-bold text-danger">${v}</td>
+                    </tr>`).join('')}
+                </tbody>
+            </table>`;
+
+        if (errorEntries.length === 0) {
+            errorDiv.innerHTML = `<div class="alert alert-success small"><i class="bi bi-check-circle me-2"></i>Keine aktiven Fehler-Metriken.</div>`;
+        } else {
+            errorDiv.innerHTML = `
+                <div class="mb-2"><span class="badge bg-secondary">${errorCount} Metriken</span></div>
+                ${targetHtml}
+                ${diagnosisHtml}
+                ${tableHtml}`;
+        }
     }
 
     // =========================================================================
@@ -289,8 +348,9 @@ const K8sClient = (() => {
                     configDiv.innerHTML = warning;
                     errorDiv.innerHTML  = `<div class="alert alert-warning m-3 small">Keine Daten – Sidecar nicht aktiv.</div>`;
                 } else {
+                    const targetUrl = document.getElementById('url')?.value ?? '';
                     renderTabA(report.reachability, configDiv);
-                    renderTabB(report.healthDiagnostics, errorDiv);
+                    renderTabB(report.healthDiagnostics, errorDiv, targetUrl);
                 }
 
                 renderTabC(context, status, resourceDiv);
