@@ -10,6 +10,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -144,6 +145,174 @@ public class K8sDiagnosticService {
             envoy.put("error", "Envoy Admin API nicht erreichbar: " + e.getMessage());
         }
         return envoy;
+    }
+
+    public Map<String, Object> correlateUrl(String url, String namespace) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            URI uri = URI.create(url);
+            String host = uri.getHost();
+            String path = (uri.getPath() == null || uri.getPath().isBlank()) ? "/" : uri.getPath();
+            int port = uri.getPort();
+
+            result.put("requestedHost", host);
+            result.put("requestedPath", path);
+
+            List<Map<String, Object>> matchedVs = new ArrayList<>();
+            for (Object vsObj : getIstioResources(namespace, "virtualservices")) {
+                if (!(vsObj instanceof Map<?, ?> vs)) continue;
+                Map<String, Object> analysis = analyzeVirtualService(vs, host, path, port);
+                if (Boolean.TRUE.equals(analysis.get("hostMatch"))) matchedVs.add(analysis);
+            }
+
+            List<Map<String, Object>> matchedDrs = new ArrayList<>();
+            for (Object drObj : getIstioResources(namespace, "destinationrules")) {
+                if (!(drObj instanceof Map<?, ?> dr)) continue;
+                Map<String, Object> analysis = analyzeDestinationRule(dr, host);
+                if (Boolean.TRUE.equals(analysis.get("hostMatch"))) matchedDrs.add(analysis);
+            }
+
+            result.put("matchedVirtualServices", matchedVs);
+            result.put("matchedDestinationRules", matchedDrs);
+            result.put("hasMatch", !matchedVs.isEmpty() || !matchedDrs.isEmpty());
+        } catch (Exception e) {
+            result.put("error", e.getMessage());
+        }
+        return result;
+    }
+
+    private Map<String, Object> analyzeVirtualService(Map<?, ?> vs, String targetHost, String targetPath, int targetPort) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        Map<?, ?> metadata = (Map<?, ?>) vs.get("metadata");
+        Map<?, ?> spec = (Map<?, ?>) vs.get("spec");
+        result.put("name", metadata != null ? metadata.get("name") : "?");
+        result.put("hostMatch", false);
+        if (spec == null) return result;
+
+        List<?> vsHosts = (List<?>) spec.get("hosts");
+        if (vsHosts == null) return result;
+
+        boolean hostMatch = vsHosts.stream().map(Object::toString).anyMatch(h -> hostsMatch(h, targetHost));
+        result.put("hostMatch", hostMatch);
+        result.put("vsHosts", vsHosts);
+        if (!hostMatch) return result;
+
+        List<?> httpRules = (List<?>) spec.get("http");
+        if (httpRules == null || httpRules.isEmpty()) {
+            result.put("noHttpRoutes", true);
+            return result;
+        }
+
+        List<Map<String, Object>> routes = new ArrayList<>();
+        for (Object ruleObj : httpRules) {
+            if (!(ruleObj instanceof Map<?, ?> rule)) continue;
+            routes.add(analyzeHttpRule(rule, targetPath));
+        }
+        result.put("httpRoutes", routes);
+        result.put("pathMatch", routes.stream().anyMatch(r -> Boolean.TRUE.equals(r.get("pathMatch"))));
+        return result;
+    }
+
+    private Map<String, Object> analyzeHttpRule(Map<?, ?> rule, String targetPath) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (rule.get("name") != null) result.put("name", rule.get("name").toString());
+
+        List<?> matches = (List<?>) rule.get("match");
+        boolean pathMatch;
+        String matchReason;
+
+        if (matches == null || matches.isEmpty()) {
+            pathMatch = true;
+            matchReason = "Kein Match-Filter – trifft alle Pfade";
+        } else {
+            String found = null;
+            outer:
+            for (Object mObj : matches) {
+                if (!(mObj instanceof Map<?, ?> m)) continue;
+                Map<?, ?> uriMatch = (Map<?, ?>) m.get("uri");
+                if (uriMatch == null) { found = "Kein URI-Filter in Match-Regel"; break; }
+                if (uriMatch.containsKey("exact")) {
+                    if (targetPath.equals(uriMatch.get("exact").toString())) { found = "exact: " + uriMatch.get("exact"); break; }
+                } else if (uriMatch.containsKey("prefix")) {
+                    if (targetPath.startsWith(uriMatch.get("prefix").toString())) { found = "prefix: " + uriMatch.get("prefix"); break; }
+                } else if (uriMatch.containsKey("regex")) {
+                    try { if (targetPath.matches(uriMatch.get("regex").toString())) { found = "regex: " + uriMatch.get("regex"); break outer; } }
+                    catch (Exception ignored) {}
+                }
+            }
+            pathMatch = found != null;
+            matchReason = pathMatch ? "Match: " + found : "Kein URI-Pattern trifft auf '" + targetPath + "'";
+        }
+
+        result.put("pathMatch", pathMatch);
+        result.put("matchReason", matchReason);
+
+        List<?> routeDests = (List<?>) rule.get("route");
+        if (routeDests != null) {
+            List<Map<String, Object>> dests = new ArrayList<>();
+            for (Object destEntry : routeDests) {
+                if (!(destEntry instanceof Map<?, ?> de)) continue;
+                Map<?, ?> dest = (Map<?, ?>) de.get("destination");
+                if (dest == null) continue;
+                Map<String, Object> d = new LinkedHashMap<>();
+                d.put("host", dest.get("host"));
+                if (dest.get("subset") != null) d.put("subset", dest.get("subset"));
+                if (dest.get("port") != null) d.put("port", dest.get("port"));
+                if (de.get("weight") != null) d.put("weight", de.get("weight"));
+                dests.add(d);
+            }
+            result.put("destinations", dests);
+        }
+        if (rule.get("timeout") != null) result.put("timeout", rule.get("timeout"));
+        if (rule.get("retries") != null) result.put("retries", rule.get("retries"));
+        if (rule.get("fault") != null) result.put("faultInjection", rule.get("fault"));
+        return result;
+    }
+
+    private Map<String, Object> analyzeDestinationRule(Map<?, ?> dr, String targetHost) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        Map<?, ?> metadata = (Map<?, ?>) dr.get("metadata");
+        Map<?, ?> spec = (Map<?, ?>) dr.get("spec");
+        result.put("name", metadata != null ? metadata.get("name") : "?");
+        result.put("hostMatch", false);
+        if (spec == null) return result;
+
+        String drHost = spec.get("host") != null ? spec.get("host").toString() : null;
+        if (drHost == null) return result;
+
+        boolean hostMatch = hostsMatch(drHost, targetHost);
+        result.put("hostMatch", hostMatch);
+        result.put("drHost", drHost);
+        if (!hostMatch) return result;
+
+        if (spec.get("trafficPolicy") != null) result.put("trafficPolicy", spec.get("trafficPolicy"));
+
+        List<?> subsets = (List<?>) spec.get("subsets");
+        if (subsets != null) {
+            List<Map<String, Object>> subsetList = new ArrayList<>();
+            for (Object s : subsets) {
+                if (!(s instanceof Map<?, ?> sub)) continue;
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("name", sub.get("name"));
+                entry.put("labels", sub.get("labels"));
+                if (sub.get("trafficPolicy") != null) entry.put("trafficPolicy", sub.get("trafficPolicy"));
+                subsetList.add(entry);
+            }
+            result.put("subsets", subsetList);
+        }
+        return result;
+    }
+
+    private boolean hostsMatch(String vsHost, String targetHost) {
+        vsHost = vsHost.toLowerCase().trim();
+        targetHost = targetHost.toLowerCase().trim();
+        if (vsHost.equals("*") || vsHost.equals(targetHost)) return true;
+        if (vsHost.startsWith("*.")) return targetHost.endsWith(vsHost.substring(1));
+        // Short name matches first segment of FQDN
+        String[] parts = targetHost.split("\\.");
+        if (vsHost.equals(parts[0])) return true;
+        // "my-svc.ns" matches "my-svc.ns.svc.cluster.local"
+        return targetHost.startsWith(vsHost + ".");
     }
 
     @SuppressWarnings("unchecked")

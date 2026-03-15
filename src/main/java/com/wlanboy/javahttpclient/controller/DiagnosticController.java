@@ -99,6 +99,19 @@ public class DiagnosticController {
     }
 
     @Operation(
+        summary = "URL mit VirtualService/DestinationRule korrelieren",
+        description = "Prüft ob die angegebene URL durch einen VirtualService abgedeckt ist und welche Routen/DestinationRules zutreffen."
+    )
+    @GetMapping("/correlate")
+    public ResponseEntity<Map<String, Object>> correlateUrl(
+            @Parameter(description = "Ziel-URL", example = "http://my-service.default.svc.cluster.local/api/v1")
+            @RequestParam String url,
+            @Parameter(description = "Kubernetes-Namespace", example = "default")
+            @RequestParam(defaultValue = "default") String namespace) {
+        return ResponseEntity.ok(k8sService.correlateUrl(url, namespace));
+    }
+
+    @Operation(
         summary = "TLS-Zertifikat inspizieren",
         description = "Baut eine separate TLS-Verbindung zum Ziel auf und gibt Protokoll, Cipher Suite, Zertifikatskette und SPIFFE/mTLS-Informationen zurück."
     )
