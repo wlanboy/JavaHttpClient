@@ -1,5 +1,6 @@
 package com.wlanboy.javahttpclient.client;
 
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.net.InetAddress;
@@ -35,10 +36,16 @@ public class ClientService {
 	private static final int MAX_REDIRECTS = 10;
 
 	private final HttpClient client;
+	private final HttpClient clientHttp11;
 
 	public ClientService() {
 		client = HttpClient.newBuilder()
 				.version(Version.HTTP_2)
+				.followRedirects(Redirect.NEVER)
+				.connectTimeout(Duration.ofSeconds(10))
+				.build();
+		clientHttp11 = HttpClient.newBuilder()
+				.version(Version.HTTP_1_1)
 				.followRedirects(Redirect.NEVER)
 				.connectTimeout(Duration.ofSeconds(10))
 				.build();
@@ -54,10 +61,24 @@ public class ClientService {
 			// DNS-Auflösung vor dem Request (diagnostisch)
 			String resolvedIps = resolveDns(currentUri.getHost());
 
-			// Erster Request mit allen Headern
-			HttpResponse<String> response = client.send(
-					buildRequest(currentUri, currentMethod, currentBody, requestData, incomingHeaders),
-					BodyHandlers.ofString());
+			// Erster Request mit HTTP/2, Fallback auf HTTP/1.1 bei Protocol-Fehler
+			record RequestResult(HttpClient activeClient, HttpResponse<String> response, boolean usedFallback) {}
+			RequestResult initial;
+			try {
+				initial = new RequestResult(client,
+						client.send(buildRequest(currentUri, currentMethod, currentBody, requestData, incomingHeaders),
+								BodyHandlers.ofString()),
+						false);
+			} catch (IOException e) {
+				logger.warn("HTTP/2 fehlgeschlagen ({}), Fallback auf HTTP/1.1", e.getMessage());
+				initial = new RequestResult(clientHttp11,
+						clientHttp11.send(buildRequest(currentUri, currentMethod, currentBody, requestData, incomingHeaders),
+								BodyHandlers.ofString()),
+						true);
+			}
+			HttpClient activeClient = initial.activeClient();
+			HttpResponse<String> response = initial.response();
+			boolean usedFallback = initial.usedFallback();
 
 			// Redirects manuell verfolgen
 			while (REDIRECT_CODES.contains(response.statusCode()) && redirectChain.size() < MAX_REDIRECTS) {
@@ -81,7 +102,7 @@ public class ClientService {
 				}
 
 				// Folge-Requests ohne originale Browser-Header (kein Auth-Leak)
-				response = client.send(
+				response = activeClient.send(
 						buildRequest(currentUri, currentMethod, currentBody, null, null),
 						BodyHandlers.ofString());
 			}
@@ -94,6 +115,7 @@ public class ClientService {
 					.headers(h -> {
 						h.addAll(responseHeaders);
 						h.set("X-Protocol-Version", protocolVersion);
+						if (usedFallback) h.set("X-Protocol-Fallback", "HTTP/1.1");
 						if (resolvedIps != null) h.set("X-Resolved-IP", resolvedIps);
 						if (!redirectChain.isEmpty()) {
 							h.set("X-Redirect-Chain", serializeChain(redirectChain));
