@@ -30,7 +30,7 @@ spec:
             - containerPort: {{ .Values.service.targetPort }}
           volumeMounts:
             - name: config-volume
-              mountPath: /app/application.properties
+              mountPath: /app/config/application.properties
               subPath: application.properties
             - name: tmp-volume
               mountPath: /tmp
