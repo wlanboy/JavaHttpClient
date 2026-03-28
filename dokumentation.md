@@ -1,9 +1,8 @@
 # JavaHttpClient – Projektdokumentation
 
-## Zweck
-
 Diagnose-Tool für HTTP-Konnektivitätsprobleme in Kubernetes-Clustern mit Istio Service Mesh.
 Läuft als Pod im Cluster und ermöglicht:
+
 - HTTP-Requests über einen Java-HTTP-Client an beliebige Ziel-URLs zu senden
 - Istio-Sidecar (Envoy) Konfiguration und Fehler-Metriken auszuwerten
 - VirtualService/DestinationRule/ServiceEntry-Konfiguration mit einer Ziel-URL zu korrelieren
@@ -27,7 +26,7 @@ Läuft als Pod im Cluster und ermöglicht:
 
 ## Architektur
 
-```
+```txt
 Browser
   │
   ├─ POST /client              → HttpClientController → ClientService
@@ -52,6 +51,7 @@ Browser
 ## Backend – Klassen
 
 ### `ClientService`
+
 Sendet HTTP-Requests über `java.net.http.HttpClient`.
 
 - **HTTP/2** aktiv (`Version.HTTP_2`), fällt automatisch auf HTTP/1.1 zurück (ALPN)
@@ -69,6 +69,7 @@ Gefilterte Request-Header (werden nie weitergeleitet):
 `host`, `content-length`, `connection`, `accept-encoding`, `upgrade`
 
 Fehlermeldungen (502):
+
 | Exception | Meldung |
 |-----------|---------|
 | `UnknownHostException` | DNS Fehler: Host nicht gefunden |
@@ -81,6 +82,7 @@ Fehlermeldungen (502):
 ### `K8sDiagnosticService`
 
 **Envoy Admin API** (Standard: `http://127.0.0.1:15000`, konfigurierbar via `ENVOY_ADMIN_URL`):
+
 - `/config_dump` → vollständige Envoy-Konfiguration
 - `/clusters` → aktive Upstream-Cluster
 - `/stats` → **alle** Metriken (kein serverseitiger Filter), nur Werte ≥ 0 (non-zero)
@@ -110,6 +112,7 @@ Fehlermeldungen (502):
 **`correlateUrl(url, namespace)`** – URL-Korrelation gegen Istio-Ressourcen:
 
 *Host-Matching-Logik* (VS-Host vs. URL-Hostname):
+
 - Exakter Match
 - Wildcard: `*.namespace` matcht `foo.namespace`
 - Short-Name: `my-svc` matcht `my-svc.ns.svc.cluster.local`
@@ -130,6 +133,7 @@ Fehlermeldungen (502):
 ### `TlsInspectorService`
 
 Separater `SSLSocket`-basierter TLS-Probe (unabhängig vom Haupt-Request):
+
 - Eigener `SSLContext` mit `X509ExtendedTrustManager` der **alles akzeptiert** (auch self-signed, expired) → Chain immer sichtbar
 - SNI korrekt gesetzt via `SSLParameters`
 - Gibt zurück:
@@ -161,6 +165,7 @@ Separater `SSLSocket`-basierter TLS-Probe (unabhängig vom Haupt-Request):
 ## Frontend – Tabs & Features
 
 ### Hauptbereich (linke Spalte)
+
 - HTTP-Method-Dropdown + URL-Feld
 - Dynamische Custom-Header (Key/Value, add/remove)
 - Body-Textarea (JSON)
@@ -168,6 +173,7 @@ Separater `SSLSocket`-basierter TLS-Probe (unabhängig vom Haupt-Request):
 - Buttons: **K8s/Istio Diagnose** | **Send Request**
 
 **Response-Bereich** nach jedem Request:
+
 - `HTTP {status}`-Badge (grün/rot)
 - `HTTP/2` / `HTTP/1.1`-Badge (blau/grau) – tatsächlich verwendetes Protokoll
 - Resolved-IP-Badge (alle aufgelösten IPs)
@@ -176,6 +182,7 @@ Separater `SSLSocket`-basierter TLS-Probe (unabhängig vom Haupt-Request):
 - **TLS-Panel** (nur HTTPS): TLS-Version, Cipher Suite, mTLS/SPIFFE-Badge, aufklappbare Cert-Cards pro Zertifikat (leaf/intermediate/root) mit Ablauf-Countdown
 
 ### Historie (rechte Spalte)
+
 - Bis zu 50 Einträge in `localStorage`
 - Grüner/roter Rand je nach Status
 - Klick stellt Formular wieder her
@@ -184,16 +191,19 @@ Separater `SSLSocket`-basierter TLS-Probe (unabhängig vom Haupt-Request):
 ### Istio-Panel (nach Diagnose-Klick)
 
 **Tab A – Config & Erreichbarkeit**
+
 - Envoy Config JSON (aufklappbar)
 - Cluster-Suche mit Zähler
 - Aktive Endpoints als scrollbares Konsolen-Output
 
 **Tab B – Aktive Fehler-Metriken**
+
 - Ziel-URL-Korrelation: hebt Metriken hervor die den Hostnamen der URL enthalten
 - Diagnose-Karten (KRITISCH/WARNUNG/INFO) mit Beschreibung + Empfehlung + betroffene Metriken
 - Vollständige Metriken-Tabelle (alle Werte inkl. 0)
 
 **Tab C – Pod Kontext & Istio**
+
 - Navbar-Badges: Pod-Name, Namespace, Istio ON/OFF
 - Kontext-Tabelle: podName, namespace, istioSidecar
 - Istio Sidecar Details (clusterSummary, networkStats)
@@ -222,7 +232,7 @@ Namespace wird primär aus `/var/run/secrets/kubernetes.io/serviceaccount/namesp
 
 ## Deployment
 
-```
+```txt
 Namespace:   clients
 Service:     ClusterIP :8080
 Istio:       Gateway in istio-ingress
@@ -231,6 +241,7 @@ Hosts:       javahttpclient.tp.lan / javahttpclient.gmk.lan
 ```
 
 **Docker-Builds:**
+
 - `Dockerfile25` – Java 25 mit JRE
 - `Dockerfile25Jlink` – Java 25 mit JLink Custom Image (~295MB vs ~510MB)
 - AOT aktiv: `spring-boot:process-aot` im Build, `-Dspring.aot.enabled=true` zur Laufzeit
