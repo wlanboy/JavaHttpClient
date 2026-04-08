@@ -6,7 +6,7 @@ import io.kubernetes.client.util.Config;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.RestClient;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -14,10 +14,8 @@ import java.net.URI;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.time.Duration;
 import java.util.*;
 
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 
 @Service
 public class K8sDiagnosticService {
@@ -32,17 +30,16 @@ public class K8sDiagnosticService {
 
     private volatile ApiClient apiClient;
     private volatile CustomObjectsApi customObjectsApi;
-    private final RestTemplate restTemplate;
+    private final RestClient restClient;
     private final String envoyAdminUrl;
     private volatile boolean k8sInitialized = false;
     private volatile String k8sInitError = null;
 
     public K8sDiagnosticService() {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(Duration.ofSeconds(5));
-        factory.setReadTimeout(Duration.ofSeconds(10));
-        this.restTemplate = new RestTemplate(factory);
         this.envoyAdminUrl = System.getenv().getOrDefault("ENVOY_ADMIN_URL", "http://127.0.0.1:15000");
+        this.restClient = RestClient.builder()
+                .baseUrl(this.envoyAdminUrl)
+                .build();
         initializeK8sClient();
         logger.info("K8s Diagnostic Service initialisiert (K8s API verfügbar: {}).", k8sInitialized);
     }
@@ -102,17 +99,15 @@ public class K8sDiagnosticService {
         try {
             // Sektion A: Erreichbarkeit
             Map<String, Object> reachability = new HashMap<>();
-            reachability.put("envoyConfig", restTemplate.getForObject(envoyAdminUrl + "/config_dump", Map.class));
-            String clusters = restTemplate.getForObject(envoyAdminUrl + "/clusters", String.class);
+            reachability.put("envoyConfig", restClient.get().uri("/config_dump").retrieve().body(Map.class));
+            String clusters = restClient.get().uri("/clusters").retrieve().body(String.class);
             reachability.put("activeEndpoints", clusters);
             reachability.put("summary", summarizeClusters(clusters));
             report.put("reachability", reachability);
 
             // Sektion B: Gesundheit & Fehler
             Map<String, Object> health = new HashMap<>();
-            String rawStats = restTemplate.getForObject(
-                    envoyAdminUrl + "/stats",
-                    String.class);
+            String rawStats = restClient.get().uri("/stats").retrieve().body(String.class);
             Map<String, String> activeErrors = parseStats(rawStats, false);
             // xds-grpc ist interne Istio Control-Plane – kein App-Traffic, rausfiltern
             activeErrors.entrySet().removeIf(e -> e.getKey().startsWith("cluster.xds-grpc"));
@@ -132,13 +127,15 @@ public class K8sDiagnosticService {
     private Map<String, Object> getEnvoyDetails() {
         Map<String, Object> envoy = new HashMap<>();
         try {
-            envoy.put("info", restTemplate.getForObject(envoyAdminUrl + "/server_info", Map.class));
+            envoy.put("info", restClient.get().uri("/server_info").retrieve().body(Map.class));
 
-            String clusters = restTemplate.getForObject(envoyAdminUrl + "/clusters", String.class);
+            String clusters = restClient.get().uri("/clusters").retrieve().body(String.class);
             envoy.put("clusterSummary", summarizeClusters(clusters));
 
-            String stats = restTemplate.getForObject(
-                    envoyAdminUrl + "/stats?filter=cluster.*.upstream_rq_(5xx|timeout|retry)", String.class);
+            String stats = restClient.get()
+                    .uri("/stats?filter=cluster.*.upstream_rq_(5xx|timeout|retry)")
+                    .retrieve()
+                    .body(String.class);
             envoy.put("networkStats", parseStats(stats, false));
 
         } catch (Exception e) {
