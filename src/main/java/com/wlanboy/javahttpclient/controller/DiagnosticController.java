@@ -101,6 +101,9 @@ public class DiagnosticController {
         summary = "URL mit VirtualService/DestinationRule korrelieren",
         description = "Prüft ob die angegebene URL durch einen VirtualService abgedeckt ist und welche Routen/DestinationRules zutreffen."
     )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Korrelationsergebnis erfolgreich abgerufen")
+    })
     @GetMapping("/correlate")
     public ResponseEntity<Map<String, Object>> correlateUrl(
             @Parameter(description = "Ziel-URL", example = "http://my-service.default.svc.cluster.local/api/v1")
@@ -114,6 +117,9 @@ public class DiagnosticController {
         summary = "TLS-Zertifikat inspizieren",
         description = "Baut eine separate TLS-Verbindung zum Ziel auf und gibt Protokoll, Cipher Suite, Zertifikatskette und SPIFFE/mTLS-Informationen zurück."
     )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "TLS-Informationen erfolgreich abgerufen")
+    })
     @GetMapping("/tls")
     public ResponseEntity<Map<String, Object>> inspectTls(
             @Parameter(description = "Ziel-URL (muss https:// sein)", example = "https://example.com")
