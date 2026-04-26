@@ -69,13 +69,71 @@
                 }
             }
         },
+        "/api/k8s/tls": {
+            "get": {
+                "tags": [
+                    "Kubernetes Diagnostics"
+                ],
+                "summary": "TLS-Zertifikat inspizieren",
+                "description": "Baut eine separate TLS-Verbindung zum Ziel auf und gibt Protokoll, Cipher Suite, Zertifikatskette und SPIFFE/mTLS-Informationen zurück.",
+                "operationId": "inspectTls",
+                "parameters": [
+                    {
+                        "name": "url",
+                        "in": "query",
+                        "description": "Ziel-URL (muss https:// sein)",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        },
+                        "example": "https://example.com"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "TLS-Informationen erfolgreich abgerufen",
+                        "content": {
+                            "*/*": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/k8s/status": {
+            "get": {
+                "tags": [
+                    "Kubernetes Diagnostics"
+                ],
+                "summary": "K8s-Client-Status abrufen",
+                "description": "Zeigt ob der Kubernetes API Client erfolgreich initialisiert wurde, und listet die unterstützten Istio-Ressourcentypen und API-Versionen.",
+                "operationId": "getK8sStatus",
+                "responses": {
+                    "200": {
+                        "description": "K8s-Clientstatus",
+                        "content": {
+                            "*/*": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/k8s/istio/{type}": {
             "get": {
                 "tags": [
                     "Kubernetes Diagnostics"
                 ],
                 "summary": "Istio-Ressourcen auflisten",
-                "description": "Listet spezifische Istio-Ressourcen eines Namespaces auf. Unterstützte Typen: `virtualservices`, `destinationrules`.",
+                "description": "Listet spezifische Istio-Ressourcen eines Namespaces auf. Unterstützte Typen: `virtualservices`, `destinationrules`, `gateways`, `serviceentries`, `sidecars`, `envoyfilters`, `peerauthentications`, `requestauthentications`, `authorizationpolicies`.",
                 "operationId": "getIstioResources",
                 "parameters": [
                     {
@@ -107,7 +165,9 @@
                             "*/*": {
                                 "schema": {
                                     "type": "array",
-                                    "items": {}
+                                    "items": {
+                                        "type": "object"
+                                    }
                                 }
                             }
                         }
@@ -129,6 +189,52 @@
                 "responses": {
                     "200": {
                         "description": "Report generiert (enthält ggf. Fehlerbeschreibung im Body)",
+                        "content": {
+                            "*/*": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/k8s/correlate": {
+            "get": {
+                "tags": [
+                    "Kubernetes Diagnostics"
+                ],
+                "summary": "URL mit VirtualService/DestinationRule korrelieren",
+                "description": "Prüft ob die angegebene URL durch einen VirtualService abgedeckt ist und welche Routen/DestinationRules zutreffen.",
+                "operationId": "correlateUrl",
+                "parameters": [
+                    {
+                        "name": "url",
+                        "in": "query",
+                        "description": "Ziel-URL",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        },
+                        "example": "http://my-service.default.svc.cluster.local/api/v1"
+                    },
+                    {
+                        "name": "namespace",
+                        "in": "query",
+                        "description": "Kubernetes-Namespace",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "default"
+                        },
+                        "example": "default"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Korrelationsergebnis erfolgreich abgerufen",
                         "content": {
                             "*/*": {
                                 "schema": {
@@ -342,14 +448,14 @@
                         "type": "integer",
                         "format": "int64"
                     },
+                    "contentDisposition": {
+                        "$ref": "#/components/schemas/ContentDisposition"
+                    },
                     "acceptCharset": {
                         "type": "array",
                         "items": {
                             "type": "string"
                         }
-                    },
-                    "contentDisposition": {
-                        "$ref": "#/components/schemas/ContentDisposition"
                     },
                     "range": {
                         "type": "array",
@@ -450,14 +556,14 @@
                         },
                         "uniqueItems": true
                     },
+                    "etag": {
+                        "type": "string"
+                    },
                     "bearerAuth": {
                         "type": "string",
                         "writeOnly": true
                     },
                     "contentLanguage": {
-                        "type": "string"
-                    },
-                    "etag": {
                         "type": "string"
                     },
                     "expires": {
@@ -492,12 +598,12 @@
                             "type": "string"
                         }
                     },
+                    "contentType": {
+                        "$ref": "#/components/schemas/MediaType"
+                    },
                     "ifModifiedSince": {
                         "type": "integer",
                         "format": "int64"
-                    },
-                    "contentType": {
-                        "$ref": "#/components/schemas/MediaType"
                     }
                 }
             },
