@@ -13,6 +13,7 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +35,7 @@ public class ClientService {
 	);
 	private static final Set<Integer> REDIRECT_CODES = Set.of(301, 302, 303, 307, 308);
 	private static final int MAX_REDIRECTS = 10;
+	private static final int MAX_REDIRECT_CHAIN_HEADER_LENGTH = 4096;
 
 	private final HttpClient client;
 	private final HttpClient clientHttp11;
@@ -54,7 +56,9 @@ public class ClientService {
 	public ResponseEntity<String> sendRequest(JavaHttpRequest requestData, HttpHeaders incomingHeaders) {
 		try {
 			List<Map<String, Object>> redirectChain = new ArrayList<>();
+			Set<URI> visitedUris = new HashSet<>();
 			URI currentUri = URI.create(requestData.url());
+			visitedUris.add(currentUri);
 			String currentMethod = requestData.method().name();
 			String currentBody = requestData.body();
 
@@ -98,6 +102,11 @@ public class ClientService {
 				if (location == null) break;
 
 				URI nextUri = currentUri.resolve(location);
+				if (visitedUris.contains(nextUri)) {
+					logger.warn("Redirect-Loop erkannt: {} wurde bereits besucht", nextUri);
+					break;
+				}
+				visitedUris.add(nextUri);
 
 				Map<String, Object> step = new LinkedHashMap<>();
 				step.put("from", currentUri.toString());
@@ -130,19 +139,25 @@ public class ClientService {
 						if (usedFallback) h.set("X-Protocol-Fallback", "HTTP/1.1");
 						if (resolvedIps != null) h.set("X-Resolved-IP", resolvedIps);
 						if (!redirectChain.isEmpty()) {
-							h.set("X-Redirect-Chain", serializeChain(redirectChain));
+							String chain = serializeChain(redirectChain);
+							if (chain.length() > MAX_REDIRECT_CHAIN_HEADER_LENGTH) {
+								chain = chain.substring(0, MAX_REDIRECT_CHAIN_HEADER_LENGTH - 3) + "...";
+							}
+							h.set("X-Redirect-Chain", chain);
 						}
 					})
 					.body(response.body());
 
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			String errorDetail = formatErrorResponse(e);
+			logger.error("HTTP Request unterbrochen: {}", errorDetail);
+			return ResponseEntity.status(502)
+					.header("Content-Type", "text/plain; charset=UTF-8")
+					.body(errorDetail);
 		} catch (Exception e) {
 			String errorDetail = formatErrorResponse(e);
 			logger.error("HTTP Request fehlgeschlagen: {}", errorDetail);
-
-			if (e instanceof InterruptedException) {
-				Thread.currentThread().interrupt();
-			}
-
 			return ResponseEntity.status(502)
 					.header("Content-Type", "text/plain; charset=UTF-8")
 					.body(errorDetail);
@@ -170,8 +185,15 @@ public class ClientService {
 		}
 
 		if (requestData != null && requestData.copyHeaders() && incomingHeaders != null) {
+			Set<String> customKeys = (requestData.customHeaders() != null)
+					? requestData.customHeaders().keySet().stream()
+							.map(String::toLowerCase)
+							.collect(java.util.stream.Collectors.toSet())
+					: Set.of();
 			incomingHeaders.forEach((key, value) -> {
-				if (!BAD_HEADERS.contains(key.toLowerCase()) && !value.isEmpty()) {
+				if (!BAD_HEADERS.contains(key.toLowerCase())
+						&& !customKeys.contains(key.toLowerCase())
+						&& !value.isEmpty()) {
 					try {
 						builder.header(key, value.get(0));
 					} catch (IllegalArgumentException e) {
@@ -221,7 +243,22 @@ public class ClientService {
 	}
 
 	private String escapeJson(String s) {
-		return s.replace("\\", "\\\\").replace("\"", "\\\"");
+		StringBuilder sb = new StringBuilder(s.length() + 16);
+		for (int i = 0; i < s.length(); i++) {
+			char c = s.charAt(i);
+			switch (c) {
+				case '\\' -> sb.append("\\\\");
+				case '"'  -> sb.append("\\\"");
+				case '\n' -> sb.append("\\n");
+				case '\r' -> sb.append("\\r");
+				case '\t' -> sb.append("\\t");
+				default   -> {
+					if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
+					else sb.append(c);
+				}
+			}
+		}
+		return sb.toString();
 	}
 
 	private String formatErrorResponse(Exception e) {
