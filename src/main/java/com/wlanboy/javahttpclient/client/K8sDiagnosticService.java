@@ -116,7 +116,7 @@ public class K8sDiagnosticService {
             health.put("diagnoses", diagnoseMetrics(activeErrors));
             report.put("healthDiagnostics", health);
 
-            report.put("timestamp", new Date());
+            report.put("timestamp", java.time.Instant.now().toString());
         } catch (Exception e) {
             logger.error("Fehler beim Abruf der Envoy-Details: {}", e.getMessage());
             report.put("error", "Envoy Admin API Fehler: " + e.getMessage());
@@ -437,7 +437,7 @@ public class K8sDiagnosticService {
                 .filter(e -> e.getKey().contains(rule.pattern()))
                 .map(Map.Entry::getKey)
                 .sorted()
-                .collect(java.util.stream.Collectors.toList());
+                .toList();
 
             if (!matchingKeys.isEmpty()) {
                 Map<String, Object> diagnosis = new LinkedHashMap<>();
