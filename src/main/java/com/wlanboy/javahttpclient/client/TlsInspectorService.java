@@ -69,7 +69,7 @@ public class TlsInspectorService {
                 X509Certificate[] chain = chainRef.get();
                 if (chain != null && chain.length > 0) {
                     String spiffe = extractSpiffe(chain[0]);
-                    result.put("isMtls", spiffe != null);
+                    result.put("hasSpiffeIdentity", spiffe != null);
                     if (spiffe != null) result.put("spiffeId", spiffe);
                     result.put("chain", serializeChain(chain));
                 }
@@ -123,7 +123,6 @@ public class TlsInspectorService {
             if (sans == null) return result;
             for (List<?> san : sans) {
                 int type = (Integer) san.get(0);
-                String value = san.get(1).toString();
                 String prefix = switch (type) {
                     case 0 -> "OtherName";
                     case 1 -> "Email";
@@ -133,6 +132,10 @@ public class TlsInspectorService {
                     case 7 -> "IP";
                     default -> "Type" + type;
                 };
+                Object raw = san.get(1);
+                String value = (raw instanceof byte[] bytes)
+                        ? HexFormat.of().formatHex(bytes)
+                        : raw.toString();
                 result.add(prefix + ":" + value);
             }
         } catch (CertificateParsingException ignored) {}
