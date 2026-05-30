@@ -1,5 +1,11 @@
 # Spring Boot Layered JAR – Strategie & Anwendungsanleitung
 
+Diese Anleitung erklärt, wie ein Spring Boot JAR in optimierte Docker-Layer aufgeteilt wird.
+Ziel ist es, Build-Zeiten und Netzwerk-Traffic zu reduzieren, indem stabile Abhängigkeiten
+gecacht werden und nur der eigentliche Anwendungscode bei jedem Deployment neu übertragen wird.
+Die Anleitung deckt alle vier Schritte ab: `layers.xml`, `pom.xml`, Dockerfile sowie Sonderfälle
+für jlink und AppCDS.
+
 ## Warum Layering?
 
 Docker-Images bestehen aus aufeinander gestapelten Layern. Ändert sich ein Layer, werden alle darüber liegenden Layer neu erstellt – unabhängig davon, ob sie sich selbst verändert haben. Ein gut strukturiertes Layered JAR sorgt dafür, dass bei einem typischen Deployment (nur App-Code ändert sich) die großen Dependency-Layer aus dem Cache kommen und nur die kleinen oberen Layer neu übertragen werden.
