@@ -110,11 +110,9 @@ public class K8sDiagnosticService {
             // Sektion B: Gesundheit & Fehler
             Map<String, Object> health = new HashMap<>();
             String rawStats = restClient.get().uri("/stats").retrieve().body(String.class);
-            Map<String, String> activeErrors = parseStats(rawStats, true);
+            Map<String, String> activeErrors = parseStats(rawStats, false);
             // xds-grpc ist interne Istio Control-Plane – kein App-Traffic, rausfiltern
             activeErrors.entrySet().removeIf(e -> e.getKey().startsWith("cluster.xds-grpc"));
-            // Nur echte Fehler-Metriken behalten – nicht jeder aktive (nonzero) Zähler ist ein Problem
-            activeErrors.entrySet().removeIf(e -> !ERROR_METRIC_PATTERN.matcher(e.getKey()).find());
             health.put("activeErrorMetrics", activeErrors);
             health.put("errorCount", activeErrors.size());
             health.put("diagnoses", diagnoseMetrics(activeErrors));
@@ -129,13 +127,6 @@ public class K8sDiagnosticService {
     }
 
     private static final Pattern OUTBOUND_CLUSTER_PATTERN = Pattern.compile("^outbound\\|(\\d+)\\|([^|]*)\\|(.+)$");
-
-    // Nur Envoy-Metriken, deren Name auf ein tatsächliches Problem hindeutet (Timeouts, Fehlschläge,
-    // 4xx/5xx, offene Circuit Breaker etc.) – ein aktiver (nonzero) Zähler allein ist kein Fehler.
-    private static final Pattern ERROR_METRIC_PATTERN = Pattern.compile(
-            "fail|timeout|overflow|reject|none_healthy|destroy_remote|destroy_local|" +
-            "reset|abort|_5xx|_4xx|retry_limit_exceeded|circuit_breaker",
-            Pattern.CASE_INSENSITIVE);
 
     /**
      * Parst die Envoy Admin API (/clusters) und liefert alle über den Sidecar
