@@ -99,8 +99,8 @@ public class DiagnosticController {
     }
 
     @Operation(
-        summary = "URL mit VirtualService/DestinationRule korrelieren",
-        description = "Prüft ob die angegebene URL durch einen VirtualService abgedeckt ist und welche Routen/DestinationRules zutreffen."
+        summary = "URL mit Istio-Config korrelieren",
+        description = "Prüft ob die angegebene URL durch VirtualService/DestinationRule/ServiceEntry abgedeckt ist und ob AuthorizationPolicy/PeerAuthentication/Sidecar-Egress den Zugriff erlauben. Der Ziel-Namespace wird automatisch aus dem FQDN-Host abgeleitet (service.namespace.svc.cluster.local) und zusätzlich zum übergebenen Source-Namespace abgefragt."
     )
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Korrelationsergebnis erfolgreich abgerufen")
@@ -109,7 +109,7 @@ public class DiagnosticController {
     public ResponseEntity<Map<String, Object>> correlateUrl(
             @Parameter(description = "Ziel-URL", example = "http://my-service.default.svc.cluster.local/api/v1")
             @RequestParam String url,
-            @Parameter(description = "Kubernetes-Namespace", example = "default")
+            @Parameter(description = "Source-Namespace (Namespace des Aufrufers)", example = "default")
             @RequestParam(defaultValue = "default") String namespace) {
         return ResponseEntity.ok(istioService.correlateUrl(url, namespace));
     }
