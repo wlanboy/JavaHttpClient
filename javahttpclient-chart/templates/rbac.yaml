@@ -11,14 +11,18 @@ rules:
 
   # Istio spezifische Ressourcen für die Netzwerkanalyse
   - apiGroups: ["networking.istio.io"]
-    resources: ["virtualservices", "destinationrules", "sidecars", "gateways"]
+    resources: ["virtualservices", "destinationrules", "sidecars", "gateways", "serviceentries", "envoyfilters"]
+    verbs: ["get", "list", "watch"]
+
+  # Istio Security Ressourcen (AuthorizationPolicy/PeerAuthentication/RequestAuthentication)
+  - apiGroups: ["security.istio.io"]
+    resources: ["authorizationpolicies", "peerauthentications", "requestauthentications"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
   name: {{ .Values.deploymentname }}-diagnostic-binding
-  namespace: {{ .Release.Namespace }}
 subjects:
   - kind: ServiceAccount
     name: {{ .Values.deploymentname }}-sa
