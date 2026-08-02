@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -111,6 +112,19 @@ public class DiagnosticController {
             @Parameter(description = "Kubernetes-Namespace", example = "default")
             @RequestParam(defaultValue = "default") String namespace) {
         return ResponseEntity.ok(k8sService.correlateUrl(url, namespace));
+    }
+
+    @Operation(
+        summary = "Über Envoy erreichbare Services auflisten",
+        description = "Parst die Envoy Admin API (/clusters) und liefert alle über den Sidecar erreichbaren Outbound-Services mit Host und Port, z.B. für ein Service-Auswahl-Dropdown."
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Liste der über Envoy erreichbaren Services",
+            content = @Content(array = @ArraySchema(schema = @Schema(type = "object"))))
+    })
+    @GetMapping("/services")
+    public ResponseEntity<List<Map<String, Object>>> getReachableServices() {
+        return ResponseEntity.ok(k8sService.getReachableServices());
     }
 
     @Operation(
