@@ -59,6 +59,19 @@ const K8sClient = (() => {
     // Tab B: Fehler-Metriken
     // =========================================================================
 
+    // Nur Metriken, deren Name auf ein tatsächliches Problem hindeutet (Timeouts, Fehlschläge,
+    // 4xx/5xx, offene Circuit Breaker etc.) UND einen aktiven (nonzero) Wert haben, gelten als Fehler.
+    const ERROR_METRIC_PATTERN = /fail|timeout|overflow|reject|none_healthy|destroy_remote|destroy_local|reset|abort|_5xx|_4xx|retry_limit_exceeded|circuit_breaker/i;
+
+    function isProblemMetric(key, value) {
+        const num = Number(value);
+        return !Number.isNaN(num) && num > 0 && ERROR_METRIC_PATTERN.test(key);
+    }
+
+    function metricValueClass(key, value) {
+        return isProblemMetric(key, value) ? 'fw-bold text-danger' : 'text-body-secondary';
+    }
+
     function renderTabB(healthDiagnostics, errorDiv, targetUrl = '') {
         const errorEntries = Object.entries(healthDiagnostics?.activeErrorMetrics ?? {});
         const errorCount = healthDiagnostics?.errorCount ?? errorEntries.length;
@@ -81,7 +94,7 @@ const K8sClient = (() => {
                     <tbody>${targetMetrics.map(([k, v]) => `
                         <tr>
                             <td class="font-monospace text-truncate" style="max-width:280px;" title="${k}">${k}</td>
-                            <td class="fw-bold text-danger">${v}</td>
+                            <td class="${metricValueClass(k, v)}">${v}</td>
                         </tr>`).join('')}
                     </tbody>
                 </table>
@@ -120,7 +133,7 @@ const K8sClient = (() => {
                 <tbody>${errorEntries.map(([k, v]) => `
                     <tr>
                         <td class="font-monospace text-truncate" style="max-width:300px;" title="${k}">${k}</td>
-                        <td class="fw-bold text-danger">${v}</td>
+                        <td class="${metricValueClass(k, v)}">${v}</td>
                     </tr>`).join('')}
                 </tbody>
             </table>`;
@@ -451,6 +464,11 @@ const K8sClient = (() => {
             catch (err) { return { error: err.message }; }
         },
 
+        loadServices: async () => {
+            try { return await apiFetch('/api/k8s/services'); }
+            catch (err) { return []; }
+        },
+
         runFullDiagnostics: async () => {
             const configDiv = document.getElementById('configDisplay');
             const errorDiv  = document.getElementById('errorDisplay');
@@ -492,9 +510,32 @@ const K8sClient = (() => {
 // Navbar & Event Listener
 // =============================================================================
 
+async function refreshEnvoyServiceSelect() {
+    const select = document.getElementById('envoyServiceSelect');
+    if (!select) return;
+
+    select.innerHTML = `<option value="">Lade Services...</option>`;
+    const services = await K8sClient.loadServices();
+
+    if (!services.length) {
+        select.innerHTML = `<option value="">-- keine Envoy-Services gefunden --</option>`;
+        return;
+    }
+
+    const options = services.map(s => {
+        const url = `http://${s.host}:${s.port}`;
+        const label = s.subset ? `${s.shortName} (${s.subset}) — ${url}` : `${s.shortName} — ${url}`;
+        return `<option value="${url}">${label}</option>`;
+    }).join('');
+
+    select.innerHTML = `<option value="">-- über Envoy erreichbaren Service wählen --</option>${options}`;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     const contextEl  = document.getElementById('k8sContext');
     const diagnoseBtn = document.getElementById('k8sDiagnoseBtn');
+    const serviceSelect = document.getElementById('envoyServiceSelect');
+    const refreshServicesBtn = document.getElementById('refreshServicesBtn');
 
     const ctx = await K8sClient.loadContext();
     if (contextEl && !ctx.error) {
@@ -502,6 +543,20 @@ document.addEventListener('DOMContentLoaded', async () => {
             <span class="badge bg-dark border me-2"><i class="bi bi-cpu me-1"></i>${ctx.podName}</span>
             <span class="badge bg-dark border me-2"><i class="bi bi-tags me-1"></i>${ctx.namespace}</span>
             <span class="badge ${ctx.istioSidecar ? 'bg-success' : 'bg-warning text-dark'}">Istio: ${ctx.istioSidecar ? 'ON' : 'OFF'}</span>`;
+    }
+
+    refreshEnvoyServiceSelect();
+
+    if (serviceSelect) {
+        serviceSelect.addEventListener('change', () => {
+            if (serviceSelect.value) {
+                document.getElementById('url').value = serviceSelect.value;
+            }
+        });
+    }
+
+    if (refreshServicesBtn) {
+        refreshServicesBtn.addEventListener('click', refreshEnvoyServiceSelect);
     }
 
     if (diagnoseBtn) {
