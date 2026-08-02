@@ -732,4 +732,123 @@ class IstioDiagnosticServiceTest {
         assertEquals("MESH_EXTERNAL", result.get("location"));
         assertEquals("DNS", result.get("resolution"));
     }
+
+    // =========================================================================
+    // resolveTargetNamespace tests
+    // =========================================================================
+
+    private String invokeResolveTargetNamespace(String host, String sourceNamespace) throws Exception {
+        Method method = IstioDiagnosticService.class.getDeclaredMethod(
+                "resolveTargetNamespace", String.class, String.class);
+        method.setAccessible(true);
+        return (String) method.invoke(service, host, sourceNamespace);
+    }
+
+    @Test
+    void resolveTargetNamespace_withK8sFqdn_returnsNamespaceFromHost() throws Exception {
+        String result = invokeResolveTargetNamespace("demo-app-external.demo.svc.cluster.local", "clients");
+
+        assertEquals("demo", result);
+    }
+
+    @Test
+    void resolveTargetNamespace_withNonFqdnHost_fallsBackToSourceNamespace() throws Exception {
+        String result = invokeResolveTargetNamespace("example.com", "clients");
+
+        assertEquals("clients", result);
+    }
+
+    @Test
+    void resolveTargetNamespace_withNullHost_fallsBackToSourceNamespace() throws Exception {
+        String result = invokeResolveTargetNamespace(null, "clients");
+
+        assertEquals("clients", result);
+    }
+
+    @Test
+    void resolveTargetNamespace_withShortServiceName_fallsBackToSourceNamespace() throws Exception {
+        // "my-svc" alone has no ".namespace.svc.cluster.local" suffix
+        String result = invokeResolveTargetNamespace("my-svc", "clients");
+
+        assertEquals("clients", result);
+    }
+
+    // =========================================================================
+    // selectorMatches tests
+    // =========================================================================
+
+    private boolean invokeSelectorMatches(Map<?, ?> spec, String targetShortName) throws Exception {
+        Method method = IstioDiagnosticService.class.getDeclaredMethod(
+                "selectorMatches", Map.class, String.class);
+        method.setAccessible(true);
+        return (boolean) method.invoke(service, spec, targetShortName);
+    }
+
+    @Test
+    void selectorMatches_withNoSelector_appliesToWholeNamespace() throws Exception {
+        Map<String, Object> spec = Map.of("action", "DENY");
+
+        assertTrue(invokeSelectorMatches(spec, "demo-app-external"));
+    }
+
+    @Test
+    void selectorMatches_withMatchingAppLabel_returnsTrue() throws Exception {
+        Map<String, Object> spec = Map.of("selector", Map.of("matchLabels", Map.of("app", "demo-app-external")));
+
+        assertTrue(invokeSelectorMatches(spec, "demo-app-external"));
+    }
+
+    @Test
+    void selectorMatches_withNonMatchingAppLabel_returnsFalse() throws Exception {
+        Map<String, Object> spec = Map.of("selector", Map.of("matchLabels", Map.of("app", "demo-app-internal")));
+
+        assertFalse(invokeSelectorMatches(spec, "demo-app-external"));
+    }
+
+    // =========================================================================
+    // ruleMatchesSourceNamespace tests
+    // =========================================================================
+
+    private boolean invokeRuleMatchesSourceNamespace(Map<?, ?> spec, String sourceNamespace) throws Exception {
+        Method method = IstioDiagnosticService.class.getDeclaredMethod(
+                "ruleMatchesSourceNamespace", Map.class, String.class);
+        method.setAccessible(true);
+        return (boolean) method.invoke(service, spec, sourceNamespace);
+    }
+
+    @Test
+    void ruleMatchesSourceNamespace_withNoRules_appliesToAllSources() throws Exception {
+        Map<String, Object> spec = Map.of("action", "DENY");
+
+        assertTrue(invokeRuleMatchesSourceNamespace(spec, "clients"));
+    }
+
+    @Test
+    void ruleMatchesSourceNamespace_withMatchingNamespace_returnsTrue() throws Exception {
+        // Mirrors the demo-app-external-deny-clients AuthorizationPolicy:
+        // action DENY, rules: [{ from: [{ source: { namespaces: ["clients"] } }] }]
+        Map<String, Object> spec = Map.of(
+                "rules", List.of(Map.of(
+                        "from", List.of(Map.of(
+                                "source", Map.of("namespaces", List.of("clients")))))));
+
+        assertTrue(invokeRuleMatchesSourceNamespace(spec, "clients"));
+    }
+
+    @Test
+    void ruleMatchesSourceNamespace_withNonMatchingNamespace_returnsFalse() throws Exception {
+        Map<String, Object> spec = Map.of(
+                "rules", List.of(Map.of(
+                        "from", List.of(Map.of(
+                                "source", Map.of("namespaces", List.of("clients")))))));
+
+        assertFalse(invokeRuleMatchesSourceNamespace(spec, "demo"));
+    }
+
+    @Test
+    void ruleMatchesSourceNamespace_withNoFromClause_appliesToAllSources() throws Exception {
+        Map<String, Object> spec = Map.of("rules", List.of(Map.of("to", List.of())));
+
+        assertTrue(invokeRuleMatchesSourceNamespace(spec, "clients"));
+    }
 }
