@@ -265,7 +265,7 @@ const K8sClient = (() => {
     // Tab C: Istio Ressourcen (nachgeladen)
     // =========================================================================
 
-    async function loadIstioResources(namespace, targetUrl) {
+    async function loadIstioResources(sourceNamespace, targetUrl) {
         const section = document.getElementById('istioResourcesSection');
         if (!section) return;
 
@@ -281,44 +281,70 @@ const K8sClient = (() => {
             { key: 'authorizationpolicies', label: 'AuthorizationPolicies', icon: 'bi-shield-lock' },
         ];
 
+        // Ziel-Namespace aus "service.namespace.svc.cluster.local" ableiten, sonst = Source-Namespace.
+        // Istio-Config (v.a. DestinationRule/AuthorizationPolicy) liegt meist im Ziel-Namespace, nicht
+        // zwingend im Namespace des Aufrufers – beide müssen abgefragt werden.
+        let targetNamespace = sourceNamespace;
+        if (targetUrl) {
+            try {
+                const host = new URL(targetUrl).hostname;
+                const m = host.match(/^[a-zA-Z0-9-]+\.([a-zA-Z0-9-]+)\.svc\.cluster\.local$/);
+                if (m) targetNamespace = m[1];
+            } catch (_) {}
+        }
+        const namespaces = targetNamespace === sourceNamespace ? [sourceNamespace] : [sourceNamespace, targetNamespace];
+
         try {
-            const [results, correlation] = await Promise.all([
-                Promise.all(TYPES.map(t => apiFetch(`/api/k8s/istio/${t.key}?namespace=${encodeURIComponent(namespace)}`).catch(() => []))),
+            const [nsResults, correlation] = await Promise.all([
+                Promise.all(namespaces.map(ns =>
+                    Promise.all(TYPES.map(t => apiFetch(`/api/k8s/istio/${t.key}?namespace=${encodeURIComponent(ns)}`).catch(() => [])))
+                )),
                 targetUrl
-                    ? apiFetch(`/api/k8s/correlate?url=${encodeURIComponent(targetUrl)}&namespace=${encodeURIComponent(namespace)}`).catch(() => null)
+                    ? apiFetch(`/api/k8s/correlate?url=${encodeURIComponent(targetUrl)}&namespace=${encodeURIComponent(sourceNamespace)}`).catch(() => null)
                     : Promise.resolve(null)
             ]);
 
-            // Matched VS/DR Namen für Highlighting sammeln
-            const matchedVsNames = new Set((correlation?.matchedVirtualServices ?? []).map(v => v.name));
-            const matchedDrNames = new Set((correlation?.matchedDestinationRules ?? []).map(d => d.name));
-            const matchedSeNames = new Set((correlation?.matchedServiceEntries ?? []).map(s => s.name));
+            // Matched VS/DR/SE Namen (namespace-qualifiziert) für Highlighting sammeln
+            const matchedVsNames = new Set((correlation?.matchedVirtualServices ?? []).map(v => `${v.namespace}/${v.name}`));
+            const matchedDrNames = new Set((correlation?.matchedDestinationRules ?? []).map(d => `${d.namespace}/${d.name}`));
+            const matchedSeNames = new Set((correlation?.matchedServiceEntries ?? []).map(s => `${s.namespace}/${s.name}`));
 
             const cards = TYPES.map((t, i) => {
-                const items = Array.isArray(results[i]) ? results[i] : [];
-                const countBadge = items.length === 0
+                const itemsByNs = namespaces.map((ns, nsIdx) => ({
+                    ns,
+                    items: Array.isArray(nsResults[nsIdx][i]) ? nsResults[nsIdx][i] : []
+                }));
+                const totalCount = itemsByNs.reduce((sum, g) => sum + g.items.length, 0);
+                const countBadge = totalCount === 0
                     ? `<span class="badge bg-secondary">0</span>`
-                    : `<span class="badge bg-primary">${items.length}</span>`;
+                    : `<span class="badge bg-primary">${totalCount}</span>`;
 
                 const isVs = t.key === 'virtualservices';
                 const isDr = t.key === 'destinationrules';
                 const isSe = t.key === 'serviceentries';
 
-                const itemCards = items.map(item => {
-                    const name = item.metadata?.name ?? '?';
-                    const id = `res-${t.key}-${name}`.replace(/[^a-z0-9-]/gi, '-');
-                    const isMatched = (isVs && matchedVsNames.has(name)) || (isDr && matchedDrNames.has(name)) || (isSe && matchedSeNames.has(name));
-                    const matchBadge = isMatched ? `<span class="badge bg-success ms-1 x-small">URL-Match</span>` : '';
-                    const borderClass = isMatched ? 'border-success border-2' : '';
-                    return `
-                    <div class="border rounded mb-1 ${borderClass}">
-                        <button class="btn btn-sm w-100 text-start x-small d-flex justify-content-between align-items-center px-2 py-1"
-                                onclick="document.getElementById('${id}').classList.toggle('d-none')">
-                            <span class="font-monospace">${name}${matchBadge}</span>
-                            <i class="bi bi-chevron-down text-muted"></i>
-                        </button>
-                        <pre id="${id}" class="${isMatched ? '' : 'd-none'} x-small m-0 p-2" style="background:#1e1e1e;color:#4af626;border-radius:0 0 4px 4px;max-height:300px;overflow:auto;">${JSON.stringify(item, null, 2)}</pre>
-                    </div>`;
+                const groupsHtml = itemsByNs.map(({ ns, items }) => {
+                    if (items.length === 0) return '';
+                    const itemCards = items.map(item => {
+                        const name = item.metadata?.name ?? '?';
+                        const id = `res-${t.key}-${ns}-${name}`.replace(/[^a-z0-9-]/gi, '-');
+                        const key = `${ns}/${name}`;
+                        const isMatched = (isVs && matchedVsNames.has(key)) || (isDr && matchedDrNames.has(key)) || (isSe && matchedSeNames.has(key));
+                        const matchBadge = isMatched ? `<span class="badge bg-success ms-1 x-small">URL-Match</span>` : '';
+                        const borderClass = isMatched ? 'border-success border-2' : '';
+                        return `
+                        <div class="border rounded mb-1 ${borderClass}">
+                            <button class="btn btn-sm w-100 text-start x-small d-flex justify-content-between align-items-center px-2 py-1"
+                                    onclick="document.getElementById('${id}').classList.toggle('d-none')">
+                                <span class="font-monospace">${name}${matchBadge}</span>
+                                <i class="bi bi-chevron-down text-muted"></i>
+                            </button>
+                            <pre id="${id}" class="${isMatched ? '' : 'd-none'} x-small m-0 p-2" style="background:#1e1e1e;color:#4af626;border-radius:0 0 4px 4px;max-height:300px;overflow:auto;">${JSON.stringify(item, null, 2)}</pre>
+                        </div>`;
+                    }).join('');
+                    const nsLabel = namespaces.length > 1
+                        ? `<div class="x-small text-muted mb-1 mt-2"><code>${ns}</code></div>` : '';
+                    return nsLabel + itemCards;
                 }).join('');
 
                 return `
@@ -328,9 +354,9 @@ const K8sClient = (() => {
                         <span class="x-small fw-bold text-uppercase text-muted me-2">${t.label}</span>
                         ${countBadge}
                     </div>
-                    ${items.length === 0
-                        ? `<div class="text-muted x-small ps-1">Keine Ressourcen in Namespace <code>${namespace}</code></div>`
-                        : itemCards}
+                    ${totalCount === 0
+                        ? `<div class="text-muted x-small ps-1">Keine Ressourcen in Namespace${namespaces.length > 1 ? 's' : ''} ${namespaces.map(n => `<code>${n}</code>`).join(', ')}</div>`
+                        : groupsHtml}
                 </div>`;
             }).join('');
 
@@ -338,7 +364,7 @@ const K8sClient = (() => {
                 ${renderCorrelation(correlation, targetUrl)}
                 <h6 class="x-small fw-bold text-uppercase text-muted mb-3 ${correlation ? 'mt-3 border-top pt-3' : ''}">
                     <i class="bi bi-list-ul me-1"></i>Istio Ressourcen
-                    <span class="badge bg-light text-dark border ms-1 fw-normal">${namespace}</span>
+                    ${namespaces.map(n => `<span class="badge bg-light text-dark border ms-1 fw-normal">${n}</span>`).join('')}
                 </h6>
                 ${cards}`;
 
@@ -440,6 +466,34 @@ const K8sClient = (() => {
             ? `<span class="badge bg-success">Match gefunden</span>`
             : `<span class="badge bg-warning text-dark">Kein Match – URL nicht durch Istio-Config abgedeckt</span>`;
 
+        const authz = corr.authorizationPolicies;
+        const authzBlocked = authz && authz.verdict && authz.verdict.startsWith('BLOCKED');
+        const authzHtml = authz ? `
+            <div class="mb-1 x-small fw-bold text-muted border-top pt-2 mt-1">AuthorizationPolicies</div>
+            <div class="mb-2">
+                <span class="badge ${authzBlocked ? 'bg-danger' : 'bg-success'}">${authz.verdict}</span>
+                ${(authz.matchingPolicies ?? []).map(p => `
+                    <div class="x-small mt-1"><i class="bi bi-shield-lock me-1"></i>${p.name}
+                        <span class="badge ${p.action === 'DENY' ? 'bg-danger' : 'bg-secondary'} ms-1">${p.action}</span>
+                        ${p.appliesToSource ? `<span class="badge bg-dark ms-1">gilt für Source</span>` : ''}
+                    </div>`).join('')}
+            </div>` : '';
+
+        const peerAuth = corr.peerAuthentications ?? [];
+        const peerAuthHtml = peerAuth.length > 0 ? `
+            <div class="mb-1 x-small fw-bold text-muted border-top pt-2 mt-1">PeerAuthentications</div>
+            <div class="mb-2">${peerAuth.map(p => `
+                <span class="badge bg-dark font-monospace me-1">${p.name}: mTLS ${p.mtlsMode}</span>`).join('')}
+            </div>` : '';
+
+        const sidecarEgress = corr.sidecarEgress;
+        const sidecarEgressHtml = (sidecarEgress && sidecarEgress.restricted) ? `
+            <div class="mb-1 x-small fw-bold text-muted border-top pt-2 mt-1">Sidecar Egress-Scope (Source-Namespace)</div>
+            <div class="mb-2">
+                <span class="badge ${sidecarEgress.hostAllowed ? 'bg-success' : 'bg-danger'}">${sidecarEgress.hostAllowed ? 'Host im Egress-Scope' : 'Host NICHT im Egress-Scope'}</span>
+                ${sidecarEgress.warning ? `<div class="x-small text-danger mt-1"><i class="bi bi-exclamation-triangle me-1"></i>${sidecarEgress.warning}</div>` : ''}
+            </div>` : '';
+
         return `
         <div class="border rounded p-2 mb-2" style="background:#f8f9fa;">
             <div class="d-flex align-items-center gap-2 mb-2">
@@ -448,9 +502,15 @@ const K8sClient = (() => {
                 ${summaryBadge}
                 <code class="x-small text-truncate" style="max-width:250px;" title="${targetUrl}">${targetUrl}</code>
             </div>
+            ${corr.sourceNamespace && corr.targetNamespace ? `
+            <div class="x-small text-muted mb-2">Quelle: <code>${corr.sourceNamespace}</code> → Ziel: <code>${corr.targetNamespace}</code>
+                (abgefragte Namespaces: ${(corr.queriedNamespaces ?? []).map(n => `<code>${n}</code>`).join(', ')})</div>` : ''}
             ${vsMatches.length > 0 ? `<div class="mb-1 x-small fw-bold text-muted">VirtualServices</div>${vsHtml}` : ''}
             ${drMatches.length > 0 ? `<div class="mb-1 x-small fw-bold text-muted border-top pt-2 mt-1">DestinationRules</div>${drHtml}` : ''}
             ${seMatches.length > 0 ? `<div class="mb-1 x-small fw-bold text-muted border-top pt-2 mt-1">ServiceEntries</div>${seHtml}` : ''}
+            ${authzHtml}
+            ${peerAuthHtml}
+            ${sidecarEgressHtml}
         </div>`;
     }
 
