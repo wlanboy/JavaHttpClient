@@ -161,44 +161,227 @@ public class IstioDiagnosticService {
         return envoy;
     }
 
-    public Map<String, Object> correlateUrl(String url, String namespace) {
+    private static final Pattern K8S_FQDN_PATTERN =
+            Pattern.compile("^[a-zA-Z0-9-]+\\.([a-zA-Z0-9-]+)\\.svc\\.cluster\\.local$");
+
+    /**
+     * Leitet den Ziel-Namespace aus einem "service.namespace.svc.cluster.local"-Host ab.
+     * Fällt auf sourceNamespace zurück, wenn der Host kein solches FQDN ist (z. B. externer Host).
+     */
+    private String resolveTargetNamespace(String host, String sourceNamespace) {
+        if (host == null) return sourceNamespace;
+        Matcher m = K8S_FQDN_PATTERN.matcher(host);
+        return m.matches() ? m.group(1) : sourceNamespace;
+    }
+
+    public Map<String, Object> correlateUrl(String url, String sourceNamespace) {
         Map<String, Object> result = new LinkedHashMap<>();
         try {
             URI uri = URI.create(url);
             String host = uri.getHost();
             String path = (uri.getPath() == null || uri.getPath().isBlank()) ? "/" : uri.getPath();
             int port = uri.getPort();
+            String targetNamespace = resolveTargetNamespace(host, sourceNamespace);
+            List<String> namespaces = targetNamespace.equals(sourceNamespace)
+                    ? List.of(sourceNamespace)
+                    : List.of(sourceNamespace, targetNamespace);
 
             result.put("requestedHost", host);
             result.put("requestedPath", path);
+            result.put("sourceNamespace", sourceNamespace);
+            result.put("targetNamespace", targetNamespace);
+            result.put("queriedNamespaces", namespaces);
 
             List<Map<String, Object>> matchedVs = new ArrayList<>();
-            for (Object vsObj : getIstioResources(namespace, "virtualservices")) {
-                if (!(vsObj instanceof Map<?, ?> vs)) continue;
-                Map<String, Object> analysis = analyzeVirtualService(vs, host, path, port);
-                if (Boolean.TRUE.equals(analysis.get("hostMatch"))) matchedVs.add(analysis);
+            for (String ns : namespaces) {
+                for (Object vsObj : getIstioResources(ns, "virtualservices")) {
+                    if (!(vsObj instanceof Map<?, ?> vs)) continue;
+                    Map<String, Object> analysis = analyzeVirtualService(vs, host, path, port);
+                    if (Boolean.TRUE.equals(analysis.get("hostMatch"))) {
+                        analysis.put("namespace", ns);
+                        matchedVs.add(analysis);
+                    }
+                }
             }
 
             List<Map<String, Object>> matchedDrs = new ArrayList<>();
-            for (Object drObj : getIstioResources(namespace, "destinationrules")) {
-                if (!(drObj instanceof Map<?, ?> dr)) continue;
-                Map<String, Object> analysis = analyzeDestinationRule(dr, host);
-                if (Boolean.TRUE.equals(analysis.get("hostMatch"))) matchedDrs.add(analysis);
+            for (String ns : namespaces) {
+                for (Object drObj : getIstioResources(ns, "destinationrules")) {
+                    if (!(drObj instanceof Map<?, ?> dr)) continue;
+                    Map<String, Object> analysis = analyzeDestinationRule(dr, host);
+                    if (Boolean.TRUE.equals(analysis.get("hostMatch"))) {
+                        analysis.put("namespace", ns);
+                        matchedDrs.add(analysis);
+                    }
+                }
             }
 
             List<Map<String, Object>> matchedSes = new ArrayList<>();
-            for (Object seObj : getIstioResources(namespace, "serviceentries")) {
-                if (!(seObj instanceof Map<?, ?> se)) continue;
-                Map<String, Object> analysis = analyzeServiceEntry(se, host, port);
-                if (Boolean.TRUE.equals(analysis.get("hostMatch"))) matchedSes.add(analysis);
+            for (String ns : namespaces) {
+                for (Object seObj : getIstioResources(ns, "serviceentries")) {
+                    if (!(seObj instanceof Map<?, ?> se)) continue;
+                    Map<String, Object> analysis = analyzeServiceEntry(se, host, port);
+                    if (Boolean.TRUE.equals(analysis.get("hostMatch"))) {
+                        analysis.put("namespace", ns);
+                        matchedSes.add(analysis);
+                    }
+                }
             }
+
+            String targetShortName = host != null ? host.split("\\.")[0] : null;
+            Map<String, Object> authz = analyzeAuthorizationPolicies(targetNamespace, targetShortName, sourceNamespace);
+            List<Map<String, Object>> peerAuth = analyzePeerAuthentications(targetNamespace, targetShortName);
+            Map<String, Object> sidecarEgress = analyzeSidecarEgress(sourceNamespace, host);
 
             result.put("matchedVirtualServices", matchedVs);
             result.put("matchedDestinationRules", matchedDrs);
             result.put("matchedServiceEntries", matchedSes);
+            result.put("authorizationPolicies", authz);
+            result.put("peerAuthentications", peerAuth);
+            result.put("sidecarEgress", sidecarEgress);
             result.put("hasMatch", !matchedVs.isEmpty() || !matchedDrs.isEmpty() || !matchedSes.isEmpty());
         } catch (Exception e) {
             result.put("error", e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * Prüft AuthorizationPolicies im Ziel-Namespace gegen den Selector (App-Kurzname) und
+     * ermittelt, ob der Source-Namespace laut Policy blockiert wird (DENY) oder – bei
+     * vorhandenen ALLOW-Policies für den Workload – nicht in der Allow-Liste steht.
+     */
+    private Map<String, Object> analyzeAuthorizationPolicies(String targetNamespace, String targetShortName, String sourceNamespace) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        List<Map<String, Object>> matchingPolicies = new ArrayList<>();
+        boolean deniedBySpecificRule = false;
+        boolean hasAllowPolicy = false;
+        boolean allowedBySpecificRule = false;
+
+        for (Object obj : getIstioResources(targetNamespace, "authorizationpolicies")) {
+            if (!(obj instanceof Map<?, ?> ap)) continue;
+            Map<?, ?> metadata = (Map<?, ?>) ap.get("metadata");
+            Map<?, ?> spec = (Map<?, ?>) ap.get("spec");
+            if (spec == null || !selectorMatches(spec, targetShortName)) continue;
+
+            String action = spec.get("action") != null ? spec.get("action").toString() : "ALLOW";
+            boolean sourceMatches = ruleMatchesSourceNamespace(spec, sourceNamespace);
+
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("name", metadata != null ? metadata.get("name") : "?");
+            entry.put("action", action);
+            entry.put("appliesToSource", sourceMatches);
+            matchingPolicies.add(entry);
+
+            if ("DENY".equalsIgnoreCase(action)) {
+                if (sourceMatches) deniedBySpecificRule = true;
+            } else {
+                hasAllowPolicy = true;
+                if (sourceMatches) allowedBySpecificRule = true;
+            }
+        }
+
+        result.put("matchingPolicies", matchingPolicies);
+        String verdict;
+        if (deniedBySpecificRule) {
+            verdict = "BLOCKED – DENY-Policy greift für Source-Namespace '" + sourceNamespace + "'";
+        } else if (hasAllowPolicy && !allowedBySpecificRule) {
+            verdict = "BLOCKED – ALLOW-Policies vorhanden, aber keine erlaubt Source-Namespace '" + sourceNamespace + "' (Deny-by-default)";
+        } else {
+            verdict = "ALLOWED – keine blockierende AuthorizationPolicy gefunden";
+        }
+        result.put("verdict", verdict);
+        return result;
+    }
+
+    private boolean selectorMatches(Map<?, ?> spec, String targetShortName) {
+        if (!(spec.get("selector") instanceof Map<?, ?> selector)) return true;
+        if (!(selector.get("matchLabels") instanceof Map<?, ?> matchLabels)) return true;
+        Object appLabel = matchLabels.get("app");
+        if (appLabel == null) return true;
+        return targetShortName != null && targetShortName.equalsIgnoreCase(appLabel.toString());
+    }
+
+    private boolean ruleMatchesSourceNamespace(Map<?, ?> spec, String sourceNamespace) {
+        List<?> rules = (List<?>) spec.get("rules");
+        if (rules == null || rules.isEmpty()) return true;
+        for (Object ruleObj : rules) {
+            if (!(ruleObj instanceof Map<?, ?> rule)) continue;
+            List<?> froms = (List<?>) rule.get("from");
+            if (froms == null || froms.isEmpty()) return true;
+            for (Object fromObj : froms) {
+                if (!(fromObj instanceof Map<?, ?> from)) continue;
+                if (!(from.get("source") instanceof Map<?, ?> source)) continue;
+                List<?> sourceNamespaces = (List<?>) source.get("namespaces");
+                if (sourceNamespaces == null) return true;
+                if (sourceNamespaces.stream().map(Object::toString).anyMatch(n -> n.equalsIgnoreCase(sourceNamespace))) return true;
+            }
+        }
+        return false;
+    }
+
+    private List<Map<String, Object>> analyzePeerAuthentications(String targetNamespace, String targetShortName) {
+        List<Map<String, Object>> results = new ArrayList<>();
+        for (Object obj : getIstioResources(targetNamespace, "peerauthentications")) {
+            if (!(obj instanceof Map<?, ?> pa)) continue;
+            Map<?, ?> metadata = (Map<?, ?>) pa.get("metadata");
+            Map<?, ?> spec = (Map<?, ?>) pa.get("spec");
+            if (spec == null || !selectorMatches(spec, targetShortName)) continue;
+
+            Map<?, ?> mtls = (Map<?, ?>) spec.get("mtls");
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("name", metadata != null ? metadata.get("name") : "?");
+            entry.put("mtlsMode", mtls != null && mtls.get("mode") != null ? mtls.get("mode") : "UNSET (erbt Mesh/Namespace-Default)");
+            results.add(entry);
+        }
+        return results;
+    }
+
+    /**
+     * Prüft, ob ein Sidecar-Resource im Source-Namespace den Egress auf bestimmte Hosts
+     * beschränkt (egress-Scoping). Ist der Ziel-Host nicht im Scope, hat der Sidecar
+     * keine Cluster-Config dafür – der Request scheitert unabhängig von VS/DR/AuthorizationPolicy.
+     */
+    private Map<String, Object> analyzeSidecarEgress(String sourceNamespace, String targetHost) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        List<Object> sidecars = getIstioResources(sourceNamespace, "sidecars");
+        if (sidecars.isEmpty()) {
+            result.put("restricted", false);
+            result.put("info", "Kein Sidecar-Resource im Source-Namespace – kein Egress-Scoping aktiv.");
+            return result;
+        }
+
+        List<String> checkedHosts = new ArrayList<>();
+        boolean hostAllowed = false;
+        for (Object obj : sidecars) {
+            if (!(obj instanceof Map<?, ?> sc)) continue;
+            Map<?, ?> spec = (Map<?, ?>) sc.get("spec");
+            List<?> egress = spec != null ? (List<?>) spec.get("egress") : null;
+            if (egress == null) continue;
+            for (Object egObj : egress) {
+                if (!(egObj instanceof Map<?, ?> eg)) continue;
+                List<?> hosts = (List<?>) eg.get("hosts");
+                if (hosts == null) continue;
+                for (Object h : hosts) {
+                    String hostEntry = h.toString();
+                    checkedHosts.add(hostEntry);
+                    if (hostEntry.equals("*/*")) { hostAllowed = true; continue; }
+                    String[] parts = hostEntry.split("/", 2);
+                    String nsFilter = parts[0];
+                    String hostFilter = parts.length > 1 ? parts[1] : "*";
+                    boolean nsOk = nsFilter.equals("*") || nsFilter.equals(".") || nsFilter.equalsIgnoreCase(sourceNamespace);
+                    boolean hostOk = hostFilter.equals("*")
+                            || (targetHost != null && targetHost.equalsIgnoreCase(hostFilter))
+                            || (targetHost != null && hostFilter.startsWith("*.") && targetHost.endsWith(hostFilter.substring(1)));
+                    if (nsOk && hostOk) hostAllowed = true;
+                }
+            }
+        }
+        result.put("restricted", true);
+        result.put("hostAllowed", hostAllowed);
+        result.put("checkedEgressHosts", checkedHosts);
+        if (!hostAllowed) {
+            result.put("warning", "Ziel-Host ist nicht im Sidecar-Egress-Scope des Source-Namespace – Envoy hat evtl. keine Cluster-Config dafür.");
         }
         return result;
     }
