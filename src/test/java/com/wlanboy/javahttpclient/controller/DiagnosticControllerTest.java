@@ -1,6 +1,6 @@
 package com.wlanboy.javahttpclient.controller;
 
-import com.wlanboy.javahttpclient.client.K8sDiagnosticService;
+import com.wlanboy.javahttpclient.client.IstioDiagnosticService;
 import com.wlanboy.javahttpclient.client.TlsInspectorService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,7 +18,7 @@ import static org.mockito.Mockito.*;
 class DiagnosticControllerTest {
 
     @Mock
-    private K8sDiagnosticService k8sService;
+    private IstioDiagnosticService istioService;
 
     @Mock
     private TlsInspectorService tlsService;
@@ -32,7 +32,7 @@ class DiagnosticControllerTest {
         context.put("podName", "test-pod-123");
         context.put("namespace", "default");
         context.put("istioSidecar", true);
-        when(k8sService.getContext()).thenReturn(context);
+        when(istioService.getContext()).thenReturn(context);
 
         ResponseEntity<Map<String, Object>> response = controller.getContext();
 
@@ -41,7 +41,7 @@ class DiagnosticControllerTest {
         assertEquals("test-pod-123", response.getBody().get("podName"));
         assertEquals("default", response.getBody().get("namespace"));
         assertEquals(true, response.getBody().get("istioSidecar"));
-        verify(k8sService).getContext();
+        verify(istioService).getContext();
     }
 
     @Test
@@ -50,7 +50,7 @@ class DiagnosticControllerTest {
         context.put("podName", "test-pod-456");
         context.put("namespace", "production");
         context.put("istioSidecar", false);
-        when(k8sService.getContext()).thenReturn(context);
+        when(istioService.getContext()).thenReturn(context);
 
         ResponseEntity<Map<String, Object>> response = controller.getContext();
 
@@ -67,7 +67,7 @@ class DiagnosticControllerTest {
         reachability.put("summary", "10 aktive Upstream-Cluster-Einträge");
         report.put("reachability", reachability);
         report.put("timestamp", new Date());
-        when(k8sService.getFullSidecarDetails()).thenReturn(report);
+        when(istioService.getFullSidecarDetails()).thenReturn(report);
 
         ResponseEntity<Map<String, Object>> response = controller.getFullReport();
 
@@ -75,14 +75,14 @@ class DiagnosticControllerTest {
         assertNotNull(response.getBody());
         assertTrue(response.getBody().containsKey("reachability"));
         assertTrue(response.getBody().containsKey("timestamp"));
-        verify(k8sService).getFullSidecarDetails();
+        verify(istioService).getFullSidecarDetails();
     }
 
     @Test
     void getFullReport_withError_returnsOkWithErrorMessage() {
         Map<String, Object> report = new HashMap<>();
         report.put("error", "Istio Sidecar Proxy ist nicht aktiv");
-        when(k8sService.getFullSidecarDetails()).thenReturn(report);
+        when(istioService.getFullSidecarDetails()).thenReturn(report);
 
         ResponseEntity<Map<String, Object>> response = controller.getFullReport();
 
@@ -99,7 +99,7 @@ class DiagnosticControllerTest {
         health.put("activeErrorMetrics", Map.of("cluster.outbound.upstream_rq_5xx", "5"));
         health.put("errorCount", 1);
         report.put("healthDiagnostics", health);
-        when(k8sService.getFullSidecarDetails()).thenReturn(report);
+        when(istioService.getFullSidecarDetails()).thenReturn(report);
 
         ResponseEntity<Map<String, Object>> response = controller.getFullReport();
 
@@ -117,14 +117,14 @@ class DiagnosticControllerTest {
                 Map.of("metadata", Map.of("name", "vs-test")),
                 Map.of("metadata", Map.of("name", "vs-prod"))
         );
-        when(k8sService.getIstioResources("default", "virtualservices")).thenReturn(resources);
+        when(istioService.getIstioResources("default", "virtualservices")).thenReturn(resources);
 
         ResponseEntity<?> response = controller.getIstioResources("virtualservices", "default");
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
         assertEquals(2, ((List<Object>) response.getBody()).size());
-        verify(k8sService).getIstioResources("default", "virtualservices");
+        verify(istioService).getIstioResources("default", "virtualservices");
     }
 
     @Test
@@ -133,7 +133,7 @@ class DiagnosticControllerTest {
         List<Object> resources = List.of(
                 Map.of("metadata", Map.of("name", "dr-service-a"))
         );
-        when(k8sService.getIstioResources("production", "destinationrules")).thenReturn(resources);
+        when(istioService.getIstioResources("production", "destinationrules")).thenReturn(resources);
 
         ResponseEntity<?> response = controller.getIstioResources("destinationrules", "production");
 
@@ -145,20 +145,20 @@ class DiagnosticControllerTest {
     @Test
     @SuppressWarnings("unchecked")
     void getIstioResources_withDefaultNamespace_usesDefault() {
-        when(k8sService.getIstioResources("default", "virtualservices")).thenReturn(Collections.emptyList());
+        when(istioService.getIstioResources("default", "virtualservices")).thenReturn(Collections.emptyList());
 
         ResponseEntity<?> response = controller.getIstioResources("virtualservices", "default");
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
         assertTrue(((List<Object>) response.getBody()).isEmpty());
-        verify(k8sService).getIstioResources("default", "virtualservices");
+        verify(istioService).getIstioResources("default", "virtualservices");
     }
 
     @Test
     @SuppressWarnings("unchecked")
     void getIstioResources_noResourcesFound_returnsEmptyList() {
-        when(k8sService.getIstioResources("test-ns", "gateways")).thenReturn(Collections.emptyList());
+        when(istioService.getIstioResources("test-ns", "gateways")).thenReturn(Collections.emptyList());
 
         ResponseEntity<?> response = controller.getIstioResources("gateways", "test-ns");
 
@@ -169,7 +169,7 @@ class DiagnosticControllerTest {
 
     @Test
     void getIstioResources_withInvalidType_returnsBadRequest() {
-        when(k8sService.getIstioResources("default", "pods"))
+        when(istioService.getIstioResources("default", "pods"))
                 .thenThrow(new IllegalArgumentException("Ungültiger Istio-Ressourcentyp: 'pods'"));
 
         ResponseEntity<?> response = controller.getIstioResources("pods", "default");
@@ -186,11 +186,11 @@ class DiagnosticControllerTest {
         String[] namespaces = {"default", "kube-system", "istio-system", "production"};
 
         for (String namespace : namespaces) {
-            when(k8sService.getIstioResources(namespace, "virtualservices")).thenReturn(Collections.emptyList());
+            when(istioService.getIstioResources(namespace, "virtualservices")).thenReturn(Collections.emptyList());
 
             controller.getIstioResources("virtualservices", namespace);
 
-            verify(k8sService).getIstioResources(namespace, "virtualservices");
+            verify(istioService).getIstioResources(namespace, "virtualservices");
         }
     }
 
@@ -210,7 +210,7 @@ class DiagnosticControllerTest {
         correlationResult.put("matchedDestinationRules", List.of());
         correlationResult.put("matchedServiceEntries", List.of());
 
-        when(k8sService.correlateUrl("http://my-svc/api", "default")).thenReturn(correlationResult);
+        when(istioService.correlateUrl("http://my-svc/api", "default")).thenReturn(correlationResult);
 
         ResponseEntity<Map<String, Object>> response = controller.correlateUrl("http://my-svc/api", "default");
 
@@ -220,7 +220,7 @@ class DiagnosticControllerTest {
         List<Object> matchedVs = (List<Object>) response.getBody().get("matchedVirtualServices");
         assertNotNull(matchedVs);
         assertEquals(1, matchedVs.size());
-        verify(k8sService).correlateUrl("http://my-svc/api", "default");
+        verify(istioService).correlateUrl("http://my-svc/api", "default");
     }
 
     @Test
@@ -233,7 +233,7 @@ class DiagnosticControllerTest {
         correlationResult.put("matchedDestinationRules", List.of());
         correlationResult.put("matchedServiceEntries", List.of());
 
-        when(k8sService.correlateUrl("http://unknown-svc/", "default")).thenReturn(correlationResult);
+        when(istioService.correlateUrl("http://unknown-svc/", "default")).thenReturn(correlationResult);
 
         ResponseEntity<Map<String, Object>> response = controller.correlateUrl("http://unknown-svc/", "default");
 
@@ -247,7 +247,7 @@ class DiagnosticControllerTest {
         Map<String, Object> correlationResult = new HashMap<>();
         correlationResult.put("error", "Malformed URL");
 
-        when(k8sService.correlateUrl("not-a-url", "default")).thenReturn(correlationResult);
+        when(istioService.correlateUrl("not-a-url", "default")).thenReturn(correlationResult);
 
         ResponseEntity<Map<String, Object>> response = controller.correlateUrl("not-a-url", "default");
 

@@ -10,13 +10,13 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class K8sDiagnosticServiceTest {
+class IstioDiagnosticServiceTest {
 
-    private K8sDiagnosticService service;
+    private IstioDiagnosticService service;
 
     @BeforeEach
     void setUp() {
-        service = new K8sDiagnosticService();
+        service = new IstioDiagnosticService(new K8sClientService());
     }
 
     @Test
@@ -86,7 +86,7 @@ class K8sDiagnosticServiceTest {
 
     @Test
     void summarizeClusters_withNull_returnsNoDataMessage() throws Exception {
-        Method method = K8sDiagnosticService.class.getDeclaredMethod("summarizeClusters", String.class);
+        Method method = IstioDiagnosticService.class.getDeclaredMethod("summarizeClusters", String.class);
         method.setAccessible(true);
 
         String result = (String) method.invoke(service, (String) null);
@@ -96,7 +96,7 @@ class K8sDiagnosticServiceTest {
 
     @Test
     void summarizeClusters_withEmptyString_returnsNoDataMessage() throws Exception {
-        Method method = K8sDiagnosticService.class.getDeclaredMethod("summarizeClusters", String.class);
+        Method method = IstioDiagnosticService.class.getDeclaredMethod("summarizeClusters", String.class);
         method.setAccessible(true);
 
         String result = (String) method.invoke(service, "");
@@ -106,7 +106,7 @@ class K8sDiagnosticServiceTest {
 
     @Test
     void summarizeClusters_withBlankString_returnsNoDataMessage() throws Exception {
-        Method method = K8sDiagnosticService.class.getDeclaredMethod("summarizeClusters", String.class);
+        Method method = IstioDiagnosticService.class.getDeclaredMethod("summarizeClusters", String.class);
         method.setAccessible(true);
 
         String result = (String) method.invoke(service, "   ");
@@ -116,7 +116,7 @@ class K8sDiagnosticServiceTest {
 
     @Test
     void summarizeClusters_withMultipleLines_returnsCorrectCount() throws Exception {
-        Method method = K8sDiagnosticService.class.getDeclaredMethod("summarizeClusters", String.class);
+        Method method = IstioDiagnosticService.class.getDeclaredMethod("summarizeClusters", String.class);
         method.setAccessible(true);
 
         String input = "line1\nline2\nline3\nline4\nline5";
@@ -127,7 +127,7 @@ class K8sDiagnosticServiceTest {
 
     @Test
     void parseStats_withNull_returnsEmptyMap() throws Exception {
-        Method method = K8sDiagnosticService.class.getDeclaredMethod("parseStats", String.class, boolean.class);
+        Method method = IstioDiagnosticService.class.getDeclaredMethod("parseStats", String.class, boolean.class);
         method.setAccessible(true);
 
         @SuppressWarnings("unchecked")
@@ -139,7 +139,7 @@ class K8sDiagnosticServiceTest {
 
     @Test
     void parseStats_withValidStats_parsesCorrectly() throws Exception {
-        Method method = K8sDiagnosticService.class.getDeclaredMethod("parseStats", String.class, boolean.class);
+        Method method = IstioDiagnosticService.class.getDeclaredMethod("parseStats", String.class, boolean.class);
         method.setAccessible(true);
 
         String input = "cluster.upstream_rq_5xx: 10\ncluster.upstream_rq_timeout: 5\ncluster.upstream_rq_retry: 3";
@@ -155,7 +155,7 @@ class K8sDiagnosticServiceTest {
 
     @Test
     void parseStats_withOnlyNonZeroTrue_filtersZeroValues() throws Exception {
-        Method method = K8sDiagnosticService.class.getDeclaredMethod("parseStats", String.class, boolean.class);
+        Method method = IstioDiagnosticService.class.getDeclaredMethod("parseStats", String.class, boolean.class);
         method.setAccessible(true);
 
         String input = "metric_a: 10\nmetric_b: 0\nmetric_c: 5\nmetric_d: 0";
@@ -172,7 +172,7 @@ class K8sDiagnosticServiceTest {
 
     @Test
     void parseStats_withOnlyNonZeroFalse_includesAllValues() throws Exception {
-        Method method = K8sDiagnosticService.class.getDeclaredMethod("parseStats", String.class, boolean.class);
+        Method method = IstioDiagnosticService.class.getDeclaredMethod("parseStats", String.class, boolean.class);
         method.setAccessible(true);
 
         String input = "metric_a: 10\nmetric_b: 0\nmetric_c: 5";
@@ -186,7 +186,7 @@ class K8sDiagnosticServiceTest {
 
     @Test
     void parseStats_withInvalidFormat_skipsInvalidLines() throws Exception {
-        Method method = K8sDiagnosticService.class.getDeclaredMethod("parseStats", String.class, boolean.class);
+        Method method = IstioDiagnosticService.class.getDeclaredMethod("parseStats", String.class, boolean.class);
         method.setAccessible(true);
 
         String input = "valid_metric: 10\ninvalid line without colon\nanother_valid: 5";
@@ -201,7 +201,7 @@ class K8sDiagnosticServiceTest {
 
     @Test
     void parseStats_withNonNumericValue_handlesGracefully() throws Exception {
-        Method method = K8sDiagnosticService.class.getDeclaredMethod("parseStats", String.class, boolean.class);
+        Method method = IstioDiagnosticService.class.getDeclaredMethod("parseStats", String.class, boolean.class);
         method.setAccessible(true);
 
         String input = "numeric: 10\nnon_numeric: abc\nanother_numeric: 5";
@@ -216,7 +216,7 @@ class K8sDiagnosticServiceTest {
 
     @Test
     void parseStats_withColonInValue_parsesLastColon() throws Exception {
-        Method method = K8sDiagnosticService.class.getDeclaredMethod("parseStats", String.class, boolean.class);
+        Method method = IstioDiagnosticService.class.getDeclaredMethod("parseStats", String.class, boolean.class);
         method.setAccessible(true);
 
         String input = "cluster.outbound|8080||service.namespace.svc.cluster.local: 42";
@@ -229,20 +229,8 @@ class K8sDiagnosticServiceTest {
     }
 
     @Test
-    void getCurrentNamespace_returnsValue() throws Exception {
-        Method method = K8sDiagnosticService.class.getDeclaredMethod("getCurrentNamespace");
-        method.setAccessible(true);
-
-        String result = (String) method.invoke(service);
-
-        assertNotNull(result);
-        assertFalse(result.isEmpty());
-        // Should return "default" if not in K8s environment
-    }
-
-    @Test
     void checkIstioSidecar_returnsBooleanWithoutException() throws Exception {
-        Method method = K8sDiagnosticService.class.getDeclaredMethod("checkIstioSidecar");
+        Method method = IstioDiagnosticService.class.getDeclaredMethod("checkIstioSidecar");
         method.setAccessible(true);
 
         Object result = method.invoke(service);
@@ -253,7 +241,7 @@ class K8sDiagnosticServiceTest {
 
     @Test
     void serviceInitialization_doesNotThrowException() {
-        assertDoesNotThrow(() -> new K8sDiagnosticService());
+        assertDoesNotThrow(() -> new IstioDiagnosticService(new K8sClientService()));
     }
 
     @Test
@@ -292,7 +280,7 @@ class K8sDiagnosticServiceTest {
 
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> invokeDiagnoseMetrics(Map<String, String> metrics) throws Exception {
-        Method method = K8sDiagnosticService.class.getDeclaredMethod("diagnoseMetrics", Map.class);
+        Method method = IstioDiagnosticService.class.getDeclaredMethod("diagnoseMetrics", Map.class);
         method.setAccessible(true);
         return (List<Map<String, Object>>) method.invoke(service, metrics);
     }
@@ -421,7 +409,7 @@ class K8sDiagnosticServiceTest {
     // =========================================================================
 
     private boolean invokeHostsMatch(String vsHost, String targetHost) throws Exception {
-        Method method = K8sDiagnosticService.class.getDeclaredMethod("hostsMatch", String.class, String.class);
+        Method method = IstioDiagnosticService.class.getDeclaredMethod("hostsMatch", String.class, String.class);
         method.setAccessible(true);
         return (boolean) method.invoke(service, vsHost, targetHost);
     }
@@ -475,7 +463,7 @@ class K8sDiagnosticServiceTest {
     @SuppressWarnings("unchecked")
     private Map<String, Object> invokeAnalyzeVirtualService(
             Map<?, ?> vs, String targetHost, String targetPath, int targetPort) throws Exception {
-        Method method = K8sDiagnosticService.class.getDeclaredMethod(
+        Method method = IstioDiagnosticService.class.getDeclaredMethod(
                 "analyzeVirtualService", Map.class, String.class, String.class, int.class);
         method.setAccessible(true);
         return (Map<String, Object>) method.invoke(service, vs, targetHost, targetPath, targetPort);
@@ -674,7 +662,7 @@ class K8sDiagnosticServiceTest {
     @SuppressWarnings("unchecked")
     private Map<String, Object> invokeAnalyzeServiceEntry(
             Map<?, ?> se, String targetHost, int targetPort) throws Exception {
-        Method method = K8sDiagnosticService.class.getDeclaredMethod(
+        Method method = IstioDiagnosticService.class.getDeclaredMethod(
                 "analyzeServiceEntry", Map.class, String.class, int.class);
         method.setAccessible(true);
         return (Map<String, Object>) method.invoke(service, se, targetHost, targetPort);

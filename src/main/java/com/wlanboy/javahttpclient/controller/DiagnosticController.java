@@ -1,6 +1,6 @@
 package com.wlanboy.javahttpclient.controller;
 
-import com.wlanboy.javahttpclient.client.K8sDiagnosticService;
+import com.wlanboy.javahttpclient.client.IstioDiagnosticService;
 import com.wlanboy.javahttpclient.client.TlsInspectorService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -21,11 +21,11 @@ import java.util.Map;
 @Tag(name = "Kubernetes Diagnostics", description = "Diagnoseinformationen zu Kubernetes-Kontext und Istio-Sidecar")
 public class DiagnosticController {
 
-    private final K8sDiagnosticService k8sService;
+    private final IstioDiagnosticService istioService;
     private final TlsInspectorService tlsService;
 
-    public DiagnosticController(K8sDiagnosticService k8sService, TlsInspectorService tlsService) {
-        this.k8sService = k8sService;
+    public DiagnosticController(IstioDiagnosticService istioService, TlsInspectorService tlsService) {
+        this.istioService = istioService;
         this.tlsService = tlsService;
     }
 
@@ -42,7 +42,7 @@ public class DiagnosticController {
     })
     @GetMapping("/context")
     public ResponseEntity<Map<String, Object>> getContext() {
-        return ResponseEntity.ok(k8sService.getContext());
+        return ResponseEntity.ok(istioService.getContext());
     }
 
     /**
@@ -57,7 +57,7 @@ public class DiagnosticController {
     })
     @GetMapping("/istio/full-report")
     public ResponseEntity<Map<String, Object>> getFullReport() {
-        return ResponseEntity.ok(k8sService.getFullSidecarDetails());
+        return ResponseEntity.ok(istioService.getFullSidecarDetails());
     }
 
     /**
@@ -72,7 +72,7 @@ public class DiagnosticController {
     })
     @GetMapping("/status")
     public ResponseEntity<Map<String, Object>> getK8sStatus() {
-        return ResponseEntity.ok(k8sService.getK8sStatus());
+        return ResponseEntity.ok(istioService.getK8sStatus());
     }
 
     /**
@@ -92,7 +92,7 @@ public class DiagnosticController {
             @Parameter(description = "Istio-Ressourcentyp", example = "virtualservices") @PathVariable String type,
             @Parameter(description = "Kubernetes-Namespace", example = "default") @RequestParam(defaultValue = "default") String namespace) {
         try {
-            return ResponseEntity.ok(k8sService.getIstioResources(namespace, type));
+            return ResponseEntity.ok(istioService.getIstioResources(namespace, type));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
@@ -111,7 +111,7 @@ public class DiagnosticController {
             @RequestParam String url,
             @Parameter(description = "Kubernetes-Namespace", example = "default")
             @RequestParam(defaultValue = "default") String namespace) {
-        return ResponseEntity.ok(k8sService.correlateUrl(url, namespace));
+        return ResponseEntity.ok(istioService.correlateUrl(url, namespace));
     }
 
     @Operation(
@@ -124,7 +124,7 @@ public class DiagnosticController {
     })
     @GetMapping("/services")
     public ResponseEntity<List<Map<String, Object>>> getReachableServices() {
-        return ResponseEntity.ok(k8sService.getReachableServices());
+        return ResponseEntity.ok(istioService.getReachableServices());
     }
 
     @Operation(

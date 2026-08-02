@@ -1,28 +1,22 @@
 package com.wlanboy.javahttpclient.client;
 
-import io.kubernetes.client.openapi.ApiClient;
-import io.kubernetes.client.openapi.apis.CustomObjectsApi;
-import io.kubernetes.client.util.Config;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
-import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.Socket;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 
 @Service
-public class K8sDiagnosticService {
+public class IstioDiagnosticService {
 
-    private static final Logger logger = LoggerFactory.getLogger(K8sDiagnosticService.class);
+    private static final Logger logger = LoggerFactory.getLogger(IstioDiagnosticService.class);
     private static final String ISTIO_GROUP = "networking.istio.io";
     private static final List<String> ISTIO_VERSIONS = List.of("v1", "v1beta1", "v1alpha3");
     private static final Set<String> SUPPORTED_ISTIO_TYPES = Set.of(
@@ -30,47 +24,26 @@ public class K8sDiagnosticService {
             "sidecars", "envoyfilters", "peerauthentications", "requestauthentications",
             "authorizationpolicies");
 
-    private volatile ApiClient apiClient;
-    private volatile CustomObjectsApi customObjectsApi;
+    private final K8sClientService k8sClientService;
     private final RestClient restClient;
     private final String envoyAdminUrl;
-    private volatile boolean k8sInitialized = false;
-    private volatile String k8sInitError = null;
 
-    public K8sDiagnosticService() {
+    public IstioDiagnosticService(K8sClientService k8sClientService) {
+        this.k8sClientService = k8sClientService;
         this.envoyAdminUrl = System.getenv().getOrDefault("ENVOY_ADMIN_URL", "http://127.0.0.1:15000");
         this.restClient = RestClient.builder()
                 .baseUrl(this.envoyAdminUrl)
                 .build();
-        initializeK8sClient();
-        logger.info("K8s Diagnostic Service initialisiert (K8s API verfügbar: {}).", k8sInitialized);
-    }
-
-    private synchronized void initializeK8sClient() {
-        if (k8sInitialized) {
-            return;
-        }
-        try {
-            this.apiClient = Config.defaultClient();
-            this.customObjectsApi = new CustomObjectsApi(apiClient);
-            this.k8sInitialized = true;
-            this.k8sInitError = null;
-        } catch (IOException e) {
-            logger.warn("K8s API Client konnte nicht initialisiert werden: {}. Istio-Ressourcen nicht verfügbar.", e.getMessage());
-            this.k8sInitError = e.getMessage();
-        }
+        logger.info("Istio Diagnostic Service initialisiert (K8s API verfügbar: {}).", k8sClientService.isInitialized());
     }
 
     public Map<String, Object> getK8sStatus() {
-        if (!k8sInitialized) {
-            initializeK8sClient();
-        }
         Map<String, Object> status = new LinkedHashMap<>();
-        status.put("initialized", k8sInitialized);
+        status.put("initialized", k8sClientService.isInitialized());
         status.put("supportedIstioTypes", SUPPORTED_ISTIO_TYPES);
         status.put("istioVersionsProbed", ISTIO_VERSIONS);
-        if (k8sInitError != null) {
-            status.put("initError", k8sInitError);
+        if (k8sClientService.getInitError() != null) {
+            status.put("initError", k8sClientService.getInitError());
         }
         return status;
     }
@@ -80,7 +53,7 @@ public class K8sDiagnosticService {
         boolean istioPresent = checkIstioSidecar();
 
         details.put("podName", System.getenv().getOrDefault("HOSTNAME", "unknown"));
-        details.put("namespace", getCurrentNamespace());
+        details.put("namespace", k8sClientService.getCurrentNamespace());
         details.put("istioSidecar", istioPresent);
 
         if (istioPresent) {
@@ -403,7 +376,6 @@ public class K8sDiagnosticService {
         return targetHost.startsWith(vsHost + ".");
     }
 
-    @SuppressWarnings("unchecked")
     public List<Object> getIstioResources(String namespace, String type) {
         String plural = type.toLowerCase().endsWith("s") ? type.toLowerCase() : type.toLowerCase() + "s";
 
@@ -412,32 +384,19 @@ public class K8sDiagnosticService {
                     "Ungültiger Istio-Ressourcentyp: '" + type + "'. Erlaubt: " + SUPPORTED_ISTIO_TYPES);
         }
 
-        if (!k8sInitialized) {
-            initializeK8sClient();
-        }
-        if (!k8sInitialized) {
-            logger.warn("K8s API nicht verfügbar: {}", k8sInitError);
+        if (!k8sClientService.isInitialized()) {
+            logger.warn("K8s API nicht verfügbar: {}", k8sClientService.getInitError());
             return Collections.emptyList();
         }
 
         for (String version : ISTIO_VERSIONS) {
-            try {
-                logger.info("Abfrage Istio API: Group={}, Version={}, Namespace={}, Plural={}",
-                        ISTIO_GROUP, version, namespace, plural);
+            logger.info("Abfrage Istio API: Group={}, Version={}, Namespace={}, Plural={}",
+                    ISTIO_GROUP, version, namespace, plural);
 
-                Object result = customObjectsApi
-                        .listNamespacedCustomObject(ISTIO_GROUP, version, namespace, plural)
-                        .execute();
-
-                if (result instanceof Map<?, ?> resultMap) {
-                    List<Object> items = (List<Object>) resultMap.get("items");
-                    if (items != null) {
-                        logger.info("API Erfolg ({}): {} Ressourcen gefunden.", version, items.size());
-                        return items;
-                    }
-                }
-            } catch (Exception e) {
-                logger.debug("Kein Ergebnis für Version {} ({}): {}", version, type, e.getMessage());
+            Optional<List<Object>> items = k8sClientService.listNamespacedCustomObject(ISTIO_GROUP, version, namespace, plural);
+            if (items.isPresent()) {
+                logger.info("API Erfolg ({}): {} Ressourcen gefunden.", version, items.get().size());
+                return items.get();
             }
         }
 
@@ -527,14 +486,6 @@ public class K8sDiagnosticService {
                     });
         }
         return statsMap;
-    }
-
-    private String getCurrentNamespace() {
-        try {
-            return Files.readString(Paths.get("/var/run/secrets/kubernetes.io/serviceaccount/namespace")).trim();
-        } catch (Exception e) {
-            return System.getenv().getOrDefault("KUBERNETES_NAMESPACE", "default");
-        }
     }
 
     private boolean checkIstioSidecar() {
