@@ -15,6 +15,8 @@ import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 
 @Service
@@ -108,9 +110,11 @@ public class K8sDiagnosticService {
             // Sektion B: Gesundheit & Fehler
             Map<String, Object> health = new HashMap<>();
             String rawStats = restClient.get().uri("/stats").retrieve().body(String.class);
-            Map<String, String> activeErrors = parseStats(rawStats, false);
+            Map<String, String> activeErrors = parseStats(rawStats, true);
             // xds-grpc ist interne Istio Control-Plane – kein App-Traffic, rausfiltern
             activeErrors.entrySet().removeIf(e -> e.getKey().startsWith("cluster.xds-grpc"));
+            // Nur echte Fehler-Metriken behalten – nicht jeder aktive (nonzero) Zähler ist ein Problem
+            activeErrors.entrySet().removeIf(e -> !ERROR_METRIC_PATTERN.matcher(e.getKey()).find());
             health.put("activeErrorMetrics", activeErrors);
             health.put("errorCount", activeErrors.size());
             health.put("diagnoses", diagnoseMetrics(activeErrors));
@@ -122,6 +126,55 @@ public class K8sDiagnosticService {
             report.put("error", "Envoy Admin API Fehler: " + e.getMessage());
         }
         return report;
+    }
+
+    private static final Pattern OUTBOUND_CLUSTER_PATTERN = Pattern.compile("^outbound\\|(\\d+)\\|([^|]*)\\|(.+)$");
+
+    // Nur Envoy-Metriken, deren Name auf ein tatsächliches Problem hindeutet (Timeouts, Fehlschläge,
+    // 4xx/5xx, offene Circuit Breaker etc.) – ein aktiver (nonzero) Zähler allein ist kein Fehler.
+    private static final Pattern ERROR_METRIC_PATTERN = Pattern.compile(
+            "fail|timeout|overflow|reject|none_healthy|destroy_remote|destroy_local|" +
+            "reset|abort|_5xx|_4xx|retry_limit_exceeded|circuit_breaker",
+            Pattern.CASE_INSENSITIVE);
+
+    /**
+     * Parst die Envoy Admin API (/clusters) und liefert alle über den Sidecar
+     * erreichbaren Outbound-Services (Host + Port), für das Service-Dropdown im UI.
+     */
+    public List<Map<String, Object>> getReachableServices() {
+        Map<String, Map<String, Object>> byKey = new LinkedHashMap<>();
+        try {
+            String clusters = restClient.get().uri("/clusters").retrieve().body(String.class);
+            if (clusters == null) return List.of();
+
+            for (String line : clusters.split("\n")) {
+                int idx = line.indexOf("::");
+                if (idx <= 0) continue;
+                String clusterName = line.substring(0, idx);
+
+                Matcher m = OUTBOUND_CLUSTER_PATTERN.matcher(clusterName);
+                if (!m.matches()) continue;
+
+                String port = m.group(1);
+                String subset = m.group(2);
+                String host = m.group(3);
+                String key = host + ":" + port + ":" + subset;
+                if (byKey.containsKey(key)) continue;
+
+                Map<String, Object> svc = new LinkedHashMap<>();
+                svc.put("host", host);
+                svc.put("port", Integer.parseInt(port));
+                svc.put("shortName", host.split("\\.")[0]);
+                if (!subset.isBlank()) svc.put("subset", subset);
+                byKey.put(key, svc);
+            }
+        } catch (Exception e) {
+            logger.warn("Konnte Envoy Cluster-Liste für Service-Dropdown nicht abrufen: {}", e.getMessage());
+        }
+
+        List<Map<String, Object>> services = new ArrayList<>(byKey.values());
+        services.sort(Comparator.comparing(s -> (String) s.get("host")));
+        return services;
     }
 
     private Map<String, Object> getEnvoyDetails() {
