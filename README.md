@@ -268,16 +268,16 @@ curl "http://localhost:8080/api/k8s/tls?url=https://my-service.default.svc.clust
 curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash
 
 # Look up the target pod
-POD=$(kubectl get pod -n javahttpclient -l app=javahttpclient -o jsonpath='{.items[0].metadata.name}')
+POD=$(kubectl get pod -n clients -l app=javahttpclient -o jsonpath='{.items[0].metadata.name}')
 
 # Run with Maven (hot reload)
-mirrord exec -n javahttpclient --target deployment/javahttpclient -- mvn spring-boot:run
+mirrord exec -n clients --target deployment/javahttpclient -- mvn spring-boot:run
 
 # Run the packaged JAR against a specific pod
-mirrord exec -n javahttpclient --target pod/$POD -- java -jar target/javahttpclient-0.0.1-SNAPSHOT.jar
+mirrord exec -n clients --target pod/$POD -- java -jar target/javahttpclient-0.0.1-SNAPSHOT.jar
 
 # Run the packaged JAR against the deployment
-mirrord exec -n javahttpclient --target deployment/javahttpclient -- java -jar target/javahttpclient-0.0.1-SNAPSHOT.jar
+mirrord exec -n clients --target deployment/javahttpclient -- java -jar target/javahttpclient-0.0.1-SNAPSHOT.jar
 ```
 
 ---
