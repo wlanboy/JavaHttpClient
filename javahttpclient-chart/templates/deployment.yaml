@@ -18,6 +18,10 @@ spec:
         - name: {{ .Values.deploymentname }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
           env:
             - name: KUBERNETES_NAMESPACE
               valueFrom:
