@@ -19,6 +19,7 @@ volume:
 hosts: 
   - javahttpclient.tp.lan
   - javahttpclient.gmk.lan
+  - javahttpclient.localhost
 
 istio:
   gatewayName: javahttpclient-gw
@@ -35,6 +36,7 @@ certManager:
   dnsNames:
     - javahttpclient.tp.lan
     - javahttpclient.gmk.lan
+    - javahttpclient.localhost
 
 extraVolumeMounts: []
 extraVolumes: []
