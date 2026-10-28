@@ -23,12 +23,27 @@ public class K8sClientService {
 
     private static final Logger logger = LoggerFactory.getLogger(K8sClientService.class);
 
+    /**
+     * Erzeugt den {@link ApiClient}. Austauschbar, damit Tests ohne Kubeconfig
+     * und ohne laufenden Cluster auskommen.
+     */
+    @FunctionalInterface
+    interface ApiClientFactory {
+        ApiClient create() throws IOException;
+    }
+
+    private final ApiClientFactory apiClientFactory;
     private volatile ApiClient apiClient;
     private volatile CustomObjectsApi customObjectsApi;
     private volatile boolean initialized = false;
     private volatile String initError = null;
 
     public K8sClientService() {
+        this(Config::defaultClient);
+    }
+
+    K8sClientService(ApiClientFactory apiClientFactory) {
+        this.apiClientFactory = apiClientFactory;
         initializeClient();
     }
 
@@ -37,7 +52,7 @@ public class K8sClientService {
             return;
         }
         try {
-            this.apiClient = Config.defaultClient();
+            this.apiClient = apiClientFactory.create();
             this.customObjectsApi = new CustomObjectsApi(apiClient);
             this.initialized = true;
             this.initError = null;

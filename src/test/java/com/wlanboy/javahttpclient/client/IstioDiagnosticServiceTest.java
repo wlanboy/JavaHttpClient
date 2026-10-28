@@ -16,7 +16,7 @@ class IstioDiagnosticServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new IstioDiagnosticService(new K8sClientService());
+        service = new IstioDiagnosticService(K8sClientServiceTest.withoutCluster());
     }
 
     @Test
@@ -241,7 +241,7 @@ class IstioDiagnosticServiceTest {
 
     @Test
     void serviceInitialization_doesNotThrowException() {
-        assertDoesNotThrow(() -> new IstioDiagnosticService(new K8sClientService()));
+        assertDoesNotThrow(() -> new IstioDiagnosticService(K8sClientServiceTest.withoutCluster()));
     }
 
     @Test
