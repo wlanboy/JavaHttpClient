@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const exportHistoryBtn = document.getElementById('exportHistoryBtn');
 
     let requestHistory = [];
+    let tlsRequestId = 0;
     const STORAGE_KEY = 'k8s_http_client_history';
 
     // --- INITIALISIERUNG ---
@@ -36,7 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
         toggleStackBtn.addEventListener('click', () => {
             const isHidden = stacktraceArea.style.display === 'none' || stacktraceArea.style.display === '';
             stacktraceArea.style.display = isHidden ? 'block' : 'none';
-            toggleStackBtn.textContent = isHidden ? 'Stacktrace ausblenden' : 'Stacktrace Details';
+            toggleStackBtn.textContent = isHidden ? 'Stacktrace ausblenden' : 'Stacktrace anzeigen';
         });
     }
 
@@ -86,7 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
             updateResponseMetadata(response.status, duration, protocol, resolvedIp);
             renderRedirectChain(redirectChainHeader);
             if (payload.url.startsWith('https://')) fetchAndRenderTls(payload.url);
-            addToHistory(payload, response.status, duration, data);
+            addToHistory(payload, response.status, duration, data, { protocol, resolvedIp, redirectChain: redirectChainHeader });
 
             if (response.status === 502 && data.includes("---STACKTRACE---")) {
                 handleDetailedError(data);
@@ -131,14 +132,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function prepareUIForRequest() {
         submitBtn.disabled = true;
+        resetResultUI();
+        responseOutput.innerText = "Sende Request an Cluster...";
+    }
+
+    // Entfernt alle Anzeigen des vorherigen Requests (Badges, TLS, Redirects, Stacktrace)
+    function resetResultUI() {
         resultArea.style.display = 'block';
         errorBox.style.display = 'none';
         responseOutput.style.display = 'block';
-        responseOutput.innerText = "Sende Request an Cluster...";
         stacktraceArea.style.display = 'none';
-        if (toggleStackBtn) toggleStackBtn.textContent = 'Stacktrace Details';
+        if (toggleStackBtn) toggleStackBtn.textContent = 'Stacktrace anzeigen';
+        if (protocolBadge) protocolBadge.style.display = 'none';
+        const ipBadge = document.getElementById('resolvedIpBadge');
+        if (ipBadge) ipBadge.style.display = 'none';
         if (redirectChainDiv) redirectChainDiv.style.display = 'none';
-        if (tlsPanelDiv) tlsPanelDiv.style.display = 'none';
+        if (tlsPanelDiv) {
+            tlsRequestId++;
+            tlsPanelDiv.style.display = 'none';
+            tlsPanelDiv.innerHTML = '';
+        }
+    }
+
+    function statusBadgeClass(status) {
+        if (status >= 200 && status < 300) return 'badge-success';
+        if (status >= 300 && status < 400) return 'badge-info';
+        return 'badge-danger';
     }
 
     function renderRedirectChain(chainHeader) {
@@ -171,12 +190,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateResponseMetadata(status, duration, protocol = '', resolvedIp = '') {
         statusBadge.innerText = `HTTP ${status}`;
-        statusBadge.className = `badge badge-lg ${status >= 200 && status < 300 ? 'badge-success' : 'badge-danger'}`;
+        statusBadge.className = `badge badge-lg ${statusBadgeClass(status)}`;
         responseTimeText.innerText = `Dauer: ${duration}ms`;
         if (protocol && protocolBadge) {
             protocolBadge.innerText = protocol;
             protocolBadge.className = `badge ${protocol === 'HTTP/2' ? 'badge-primary' : 'badge-secondary'}`;
             protocolBadge.style.display = '';
+        } else if (protocolBadge) {
+            protocolBadge.style.display = 'none';
         }
         const ipBadge = document.getElementById('resolvedIpBadge');
         if (ipBadge) {
@@ -204,13 +225,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fetchAndRenderTls(url) {
         if (!tlsPanelDiv) return;
+        const requestId = tlsRequestId;
         tlsPanelDiv.innerHTML = `<div class="panel x-small muted"><span class="spinner spinner-sm"></span> TLS wird inspiziert...</div>`;
         tlsPanelDiv.style.display = 'block';
         try {
             const res = await fetch(`/api/k8s/tls?url=${encodeURIComponent(url)}`);
             const tls = await res.json();
+            // Ergebnis verwerfen, falls inzwischen ein anderer Request/Historieneintrag angezeigt wird
+            if (requestId !== tlsRequestId) return;
             tlsPanelDiv.innerHTML = renderTlsPanel(tls);
         } catch (e) {
+            if (requestId !== tlsRequestId) return;
             tlsPanelDiv.innerHTML = `<div class="panel x-small text-danger">TLS-Inspektion fehlgeschlagen: ${escapeHtml(e.message)}</div>`;
         }
     }
@@ -297,11 +322,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- HISTORIE & EXPORT ---
 
-    function addToHistory(payload, status, duration, responseData) {
+    function addToHistory(payload, status, duration, responseData, meta = {}) {
         const entry = {
             id: Date.now(),
             time: new Date().toLocaleTimeString(),
-            payload, status, duration, responseData
+            payload, status, duration, responseData,
+            protocol: meta.protocol ?? '',
+            resolvedIp: meta.resolvedIp ?? '',
+            redirectChain: meta.redirectChain ?? null
         };
         requestHistory.unshift(entry);
         if (requestHistory.length > 50) requestHistory.pop();
@@ -327,7 +355,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div class="truncate x-small muted" style="max-width:100%;" title="${escapeHtml(entry.payload.url)}">${escapeHtml(entry.payload.url)}</div>
                 <div class="mt-1">
-                    <span class="badge ${isErr ? 'badge-danger' : 'badge-success'}">${escapeHtml(entry.status)}</span>
+                    <span class="badge ${statusBadgeClass(entry.status)}">${escapeHtml(entry.status)}</span>
                     <small class="x-small">${escapeHtml(entry.duration)}ms</small>
                 </div>
             </div>
@@ -362,8 +390,9 @@ document.addEventListener('DOMContentLoaded', () => {
         headerContainer.innerHTML = '';
         Object.entries(entry.payload.customHeaders).forEach(([k, v]) => addHeaderRow(k, v));
 
-        resultArea.style.display = 'block';
-        updateResponseMetadata(entry.status, entry.duration);
+        resetResultUI();
+        updateResponseMetadata(entry.status, entry.duration, entry.protocol, entry.resolvedIp);
+        renderRedirectChain(entry.redirectChain);
 
         const istioPanel = document.getElementById('istioPanel');
         if (istioPanel) istioPanel.style.display = 'none';

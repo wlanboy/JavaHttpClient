@@ -596,7 +596,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     const ctx = await K8sClient.loadContext();
-    if (contextEl && !ctx.error) {
+    if (contextEl && ctx.error) {
+        contextEl.innerHTML = `
+            <span class="badge badge-warning" title="${escapeHtml(ctx.error)}">Kein Cluster-Kontext</span>`;
+    } else if (contextEl) {
         contextEl.innerHTML = `
             <span class="badge badge-dark outlined" title="Pod">pod: ${escapeHtml(ctx.podName)}</span>
             <span class="badge badge-dark outlined" title="Namespace">ns: ${escapeHtml(ctx.namespace)}</span>
