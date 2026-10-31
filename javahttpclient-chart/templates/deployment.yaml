@@ -41,18 +41,25 @@ spec:
           {{- with .Values.extraVolumeMounts }}
           {{- toYaml . | nindent 12 }}
           {{- end }}
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: {{ .Values.service.targetPort }}
+            periodSeconds: 5
+            failureThreshold: 24
+            timeoutSeconds: 3
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
               port: {{ .Values.service.targetPort }}
-            initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 3
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
               port: {{ .Values.service.targetPort }}
-            initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 3
       volumes:
         - name: config-volume
           configMap:
