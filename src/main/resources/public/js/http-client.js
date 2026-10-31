@@ -7,6 +7,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const cancelBtn = document.getElementById('cancelBtn');
     const resultArea = document.getElementById('resultArea');
     const responseOutput = document.getElementById('responseOutput');
+    const responseBodyArea = document.getElementById('responseBodyArea');
+    const responseSizeText = document.getElementById('responseSize');
+    const responseHeadersDiv = document.getElementById('responseHeaders');
+    const wrapToggle = document.getElementById('wrapToggle');
     const errorBox = document.getElementById('errorBox');
     const statusBadge = document.getElementById('statusBadge');
     const protocolBadge = document.getElementById('protocolBadge');
@@ -29,13 +33,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const submitBtnLabel = submitBtn.textContent;
     const STORAGE_KEY = 'k8s_http_client_history';
     const FORM_STORAGE_KEY = 'k8s_http_client_form';
+    const WRAP_STORAGE_KEY = 'k8s_http_client_wrap';
+    // Header, die der Proxy selbst setzt und die nicht vom Zielservice stammen
+    const PROXY_META_HEADERS = new Set([
+        'x-protocol-version', 'x-protocol-fallback', 'x-resolved-ip', 'x-body-truncated', 'x-redirect-chain'
+    ]);
+    // Darüber wird nur formatiert, nicht eingefärbt (tausende <span> machen die Seite träge)
+    const MAX_HIGHLIGHT_LENGTH = 1_000_000;
 
     // --- INITIALISIERUNG ---
     loadHistoryFromStorage();
     if (!loadFormFromStorage()) addHeaderRow('Content-Type', 'application/json');
+    wrapToggle.checked = loadWrapSetting();
+    applyWrapSetting();
 
     // --- EVENT LISTENER ---
     addHeaderBtn.addEventListener('click', () => addHeaderRow());
+
+    wrapToggle.addEventListener('change', () => {
+        applyWrapSetting();
+        try {
+            localStorage.setItem(WRAP_STORAGE_KEY, String(wrapToggle.checked));
+        } catch (e) {
+            console.error("Fehler beim Speichern der Umbruch-Einstellung", e);
+        }
+    });
 
     // Letzte Eingaben merken, damit sie einen Reload überstehen
     form.addEventListener('input', saveFormToStorage);
@@ -100,7 +122,10 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             const duration = Date.now() - startTime;
-            const data = await response.text();
+            const buffer = await response.arrayBuffer();
+            const data = new TextDecoder().decode(buffer);
+            const size = buffer.byteLength;
+            const headers = [...response.headers].filter(([name]) => !PROXY_META_HEADERS.has(name));
             const protocol = response.headers.get('x-protocol-version') ?? '';
             const resolvedIp = response.headers.get('x-resolved-ip') ?? '';
             const redirectChainHeader = response.headers.get('x-redirect-chain');
@@ -109,15 +134,14 @@ document.addEventListener('DOMContentLoaded', () => {
             updateResponseMetadata(response.status, duration, protocol, resolvedIp);
             renderRedirectChain(redirectChainHeader);
             if (payload.url.startsWith('https://')) fetchAndRenderTls(payload.url);
-            addToHistory(payload, response.status, duration, data, { protocol, resolvedIp, redirectChain: redirectChainHeader });
+            addToHistory(payload, response.status, duration, data,
+                { protocol, resolvedIp, redirectChain: redirectChainHeader, headers, size, truncatedAt });
 
             if (response.status === 502 && data.includes("---STACKTRACE---")) {
                 handleDetailedError(data);
             } else {
-                handleSuccess(data);
-                if (truncatedAt) {
-                    responseOutput.innerText += `\n\n[Response nach ${truncatedAt} Bytes gekürzt]`;
-                }
+                renderResponseInfo(headers, size, truncatedAt);
+                handleSuccess(data, truncatedAt);
             }
             scrollToResult();
         } catch (err) {
@@ -193,7 +217,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function resetResultUI() {
         resultArea.style.display = 'block';
         errorBox.style.display = 'none';
-        responseOutput.style.display = 'block';
+        responseBodyArea.style.display = 'block';
+        renderResponseInfo(null, null, null);
         stacktraceArea.style.display = 'none';
         if (toggleStackBtn) toggleStackBtn.textContent = 'Stacktrace anzeigen';
         if (protocolBadge) protocolBadge.style.display = 'none';
@@ -267,7 +292,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const [info, stack] = data.split("---STACKTRACE---");
         const lines = info.split("\n");
         errorBox.style.display = 'block';
-        responseOutput.style.display = 'none';
+        responseBodyArea.style.display = 'none';
         document.getElementById('errorSummary').innerText = lines[0];
         document.getElementById('errorDetail').innerText = lines[1] || "";
 
@@ -356,14 +381,75 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>`;
     }
 
-    function handleSuccess(data) {
+    // Zeigt Größe und Header des Upstream-Responses; ohne Werte wird beides ausgeblendet
+    function renderResponseInfo(headers, size, truncatedAt) {
+        responseSizeText.innerText = size == null ? '' : `Größe: ${formatBytes(size)}${truncatedAt ? ' (gekürzt)' : ''}`;
+        if (!headers?.length) {
+            responseHeadersDiv.style.display = 'none';
+            return;
+        }
+        document.getElementById('responseHeaderCount').innerText = headers.length;
+        document.getElementById('responseHeaderRows').innerHTML = headers.map(([name, value]) => `
+            <tr><td class="mono muted" style="width:30%;">${escapeHtml(name)}</td><td class="mono break">${escapeHtml(value)}</td></tr>`).join('');
+        responseHeadersDiv.style.display = 'block';
+    }
+
+    function formatBytes(bytes) {
+        const format = (n) => n.toLocaleString('de-DE', { maximumFractionDigits: 1 });
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${format(bytes / 1024)} KB`;
+        return `${format(bytes / (1024 * 1024))} MB`;
+    }
+
+    function handleSuccess(data, truncatedAt) {
         errorBox.style.display = 'none';
-        responseOutput.style.display = 'block';
+        responseBodyArea.style.display = 'block';
         try {
-            const json = JSON.parse(data);
-            responseOutput.innerText = JSON.stringify(json, null, 2);
+            const pretty = JSON.stringify(JSON.parse(data), null, 2);
+            if (pretty.length <= MAX_HIGHLIGHT_LENGTH) {
+                responseOutput.innerHTML = highlightJson(pretty);
+            } else {
+                responseOutput.innerText = pretty;
+            }
         } catch {
             responseOutput.innerText = data || "Empty Response";
+        }
+        if (truncatedAt) {
+            responseOutput.append(`\n\n[Response nach ${truncatedAt} Bytes gekürzt]`);
+        }
+    }
+
+    // Färbt formatiertes JSON ein. Strings werden als Ganzes erkannt, daher
+    // werden Zahlen oder true/false innerhalb von Strings nicht hervorgehoben.
+    const JSON_TOKEN = /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
+
+    function highlightJson(pretty) {
+        let html = '';
+        let last = 0;
+        for (const match of pretty.matchAll(JSON_TOKEN)) {
+            const [token, str, colon, literal] = match;
+            html += escapeHtml(pretty.slice(last, match.index));
+            if (str) {
+                html += `<span class="${colon ? 'json-key' : 'json-string'}">${escapeHtml(str)}</span>${colon ? escapeHtml(colon) : ''}`;
+            } else if (literal) {
+                html += `<span class="${literal === 'null' ? 'json-null' : 'json-boolean'}">${literal}</span>`;
+            } else {
+                html += `<span class="json-number">${escapeHtml(token)}</span>`;
+            }
+            last = match.index + token.length;
+        }
+        return html + escapeHtml(pretty.slice(last));
+    }
+
+    function applyWrapSetting() {
+        responseOutput.classList.toggle('nowrap', !wrapToggle.checked);
+    }
+
+    function loadWrapSetting() {
+        try {
+            return localStorage.getItem(WRAP_STORAGE_KEY) !== 'false';
+        } catch {
+            return true;
         }
     }
 
@@ -388,7 +474,10 @@ document.addEventListener('DOMContentLoaded', () => {
             payload, status, duration, responseData,
             protocol: meta.protocol ?? '',
             resolvedIp: meta.resolvedIp ?? '',
-            redirectChain: meta.redirectChain ?? null
+            redirectChain: meta.redirectChain ?? null,
+            headers: meta.headers ?? null,
+            size: meta.size ?? null,
+            truncatedAt: meta.truncatedAt ?? null
         };
         requestHistory.unshift(entry);
         if (requestHistory.length > 50) requestHistory.pop();
@@ -467,7 +556,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (entry.status === 502 && entry.responseData.includes("---STACKTRACE---")) {
             handleDetailedError(entry.responseData);
         } else {
-            handleSuccess(entry.responseData);
+            // Ältere Einträge haben noch keine Header/Größe gespeichert → bleibt ausgeblendet
+            renderResponseInfo(entry.headers, entry.size, entry.truncatedAt);
+            handleSuccess(entry.responseData, entry.truncatedAt);
         }
         scrollToResult();
     }

@@ -90,9 +90,16 @@
                     <span id="protocolBadge" class="badge badge-secondary" style="display:none;"></span>
                     <span id="resolvedIpBadge" class="badge badge-dark mono" style="display:none;" title="Aufgelöste IP(s)"></span>
                     <span id="responseTime" class="ms-1 muted small bold"></span>
+                    <span id="responseSize" class="ms-1 muted small bold"></span>
                 </div>
                 <div id="redirectChain" style="display:none;"></div>
                 <div id="tlsPanel" style="display:none;"></div>
+                <details id="responseHeaders" class="panel" style="display:none;">
+                    <summary class="x-small bold">Response-Header (<span id="responseHeaderCount">0</span>)</summary>
+                    <table class="table plain compact mt-2 m-0">
+                        <tbody id="responseHeaderRows"></tbody>
+                    </table>
+                </details>
 
                 <div id="errorBox" class="alert alert-danger error-box mb-3" style="display:none;">
                     <div class="error-head">
@@ -136,7 +143,16 @@
                     </div>
                 </div>
 
-                <pre id="responseOutput" class="console"></pre>
+                <div id="responseBodyArea">
+                    <div class="spread mb-2">
+                        <span class="section-title m-0">Response-Body</span>
+                        <label class="switch small">
+                            <input type="checkbox" id="wrapToggle" checked>
+                            Zeilenumbruch
+                        </label>
+                    </div>
+                    <pre id="responseOutput" class="console"></pre>
+                </div>
             </div>
         </main>
 
