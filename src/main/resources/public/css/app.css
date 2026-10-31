@@ -769,8 +769,24 @@ select.input {
     margin-bottom: 0;
 }
 
+.history-filter {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: .35rem;
+    padding: 0 1rem .5rem;
+}
+
+.history-filter input[type="search"] {
+    grid-column: 1 / -1;
+}
+
+.history-hint {
+    margin: 0;
+    padding: 0 1rem .5rem;
+}
+
 .history-list {
-    max-height: calc(100vh - 200px);
+    max-height: calc(100vh - 260px);
     overflow-y: auto;
 }
 

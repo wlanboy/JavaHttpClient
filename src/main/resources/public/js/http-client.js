@@ -25,6 +25,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const emptyHistoryMsg = document.getElementById('emptyHistoryMsg');
     const clearHistoryBtn = document.getElementById('clearHistoryBtn');
     const exportHistoryBtn = document.getElementById('exportHistoryBtn');
+    const importHistoryBtn = document.getElementById('importHistoryBtn');
+    const importHistoryFile = document.getElementById('importHistoryFile');
+    const historyFilter = document.getElementById('historyFilter');
+    const historySearch = document.getElementById('historySearch');
+    const historyMethodFilter = document.getElementById('historyMethodFilter');
+    const historyStatusFilter = document.getElementById('historyStatusFilter');
+    const historyHint = document.getElementById('historyHint');
     const urlHistoryList = document.getElementById('urlHistory');
     const methodSelect = document.getElementById('method');
     const bodyInput = document.getElementById('body');
@@ -35,7 +42,14 @@ document.addEventListener('DOMContentLoaded', () => {
     let requestHistory = [];
     let tlsRequestId = 0;
     let activeRequest = null;
+    let storageWarning = '';
+    let importMessage = null;
+    let importMessageTimer = null;
     const submitBtnLabel = submitBtn.textContent;
+    const METHODS = [...methodSelect.options].map(option => option.value);
+    const MAX_HISTORY_ENTRIES = 50;
+    // Body-Länge pro Historieneintrag, damit 50 Einträge in die ~5 MB von localStorage passen
+    const MAX_STORED_BODY_LENGTH = 64 * 1024;
     const STORAGE_KEY = 'k8s_http_client_history';
     const FORM_STORAGE_KEY = 'k8s_http_client_form';
     const WRAP_STORAGE_KEY = 'k8s_http_client_wrap';
@@ -68,6 +82,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // --- INITIALISIERUNG ---
+    historyMethodFilter.insertAdjacentHTML('beforeend',
+        METHODS.map(method => `<option value="${escapeHtml(method)}">${escapeHtml(method)}</option>`).join(''));
     loadHistoryFromStorage();
     renderHistory();
     headerNameSuggestions.innerHTML = HEADER_SUGGESTIONS.map(name => `<option value="${escapeHtml(name)}"></option>`).join('');
@@ -139,6 +155,18 @@ document.addEventListener('DOMContentLoaded', () => {
     clearHistoryBtn.addEventListener('blur', () => { if (clearConfirmTimer) resetClearHistoryBtn(); });
 
     exportHistoryBtn.addEventListener('click', exportHistoryToJson);
+
+    importHistoryBtn.addEventListener('click', () => importHistoryFile.click());
+    importHistoryFile.addEventListener('change', async () => {
+        const file = importHistoryFile.files[0];
+        // Zurücksetzen, damit dieselbe Datei erneut gewählt werden kann
+        importHistoryFile.value = '';
+        if (file) await importHistoryFromJson(file);
+    });
+
+    historySearch.addEventListener('input', renderHistory);
+    historyMethodFilter.addEventListener('change', renderHistory);
+    historyStatusFilter.addEventListener('change', renderHistory);
 
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -337,7 +365,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let steps;
         try { steps = JSON.parse(chainHeader); } catch (_) { return; }
-        if (!steps.length) { redirectChainDiv.style.display = 'none'; return; }
+        if (!Array.isArray(steps) || !steps.length) { redirectChainDiv.style.display = 'none'; return; }
 
         const statusColor = (s) => s < 400 ? 'badge-warning' : 'badge-danger';
 
@@ -573,15 +601,39 @@ document.addEventListener('DOMContentLoaded', () => {
             truncatedAt: meta.truncatedAt ?? null,
             headerRows: meta.headerRows ?? null
         };
-        requestHistory.unshift(entry);
-        if (requestHistory.length > 50) requestHistory.pop();
+        requestHistory.unshift(trimBodyForHistory(entry));
+        if (requestHistory.length > MAX_HISTORY_ENTRIES) requestHistory.pop();
 
         saveHistoryToStorage();
         renderHistory();
     }
 
+    // Kürzt den Response-Body; die Originallänge bleibt für den Hinweis beim Laden erhalten
+    function trimBodyForHistory(entry) {
+        if (entry.responseData.length <= MAX_STORED_BODY_LENGTH) return entry;
+        return {
+            ...entry,
+            responseData: entry.responseData.slice(0, MAX_STORED_BODY_LENGTH),
+            bodyTrimmedFrom: entry.bodyTrimmedFrom ?? entry.responseData.length
+        };
+    }
+
+    function matchesHistoryFilter(entry) {
+        const search = historySearch.value.trim().toLowerCase();
+        const method = historyMethodFilter.value;
+        const statusClass = historyStatusFilter.value;
+        if (search && !entry.payload.url.toLowerCase().includes(search)) return false;
+        if (method && entry.payload.method !== method) return false;
+        // "0" steht für Netzwerkfehler (Status 0), sonst die erste Ziffer des HTTP-Status
+        if (statusClass && String(Math.floor(entry.status / 100)) !== statusClass) return false;
+        return true;
+    }
+
     function renderHistory() {
-        emptyHistoryMsg.style.display = requestHistory.length ? 'none' : 'block';
+        const visibleEntries = requestHistory.filter(matchesHistoryFilter);
+        historyFilter.hidden = !requestHistory.length;
+        emptyHistoryMsg.textContent = requestHistory.length ? 'Keine Einträge passend zum Filter' : 'Keine Anfragen aufgezeichnet';
+        emptyHistoryMsg.style.display = visibleEntries.length ? 'none' : 'block';
         exportHistoryBtn.disabled = !requestHistory.length;
         clearHistoryBtn.disabled = !requestHistory.length;
         historyList.innerHTML = '';
@@ -589,7 +641,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const urls = [...new Set(requestHistory.map(entry => entry.payload.url))];
         urlHistoryList.innerHTML = urls.map(url => `<option value="${escapeHtml(url)}"></option>`).join('');
 
-        requestHistory.forEach((entry) => {
+        visibleEntries.forEach((entry) => {
             const isErr = entry.status >= 400 || entry.status === 0;
             const item = document.createElement('div');
             item.className = `history-item ${isErr ? 'is-error' : ''}`;
@@ -653,12 +705,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const istioPanel = document.getElementById('istioPanel');
         if (istioPanel) istioPanel.style.display = 'none';
 
+        const trimNote = entry.bodyTrimmedFrom
+            ? `\n\n[In der Historie auf ${MAX_STORED_BODY_LENGTH.toLocaleString('de-DE')} von ${entry.bodyTrimmedFrom.toLocaleString('de-DE')} Zeichen gekürzt]`
+            : '';
         if (entry.status === 502 && entry.responseData.includes("---STACKTRACE---")) {
             handleDetailedError(entry.responseData);
+            stacktraceArea.append(trimNote);
         } else {
             // Ältere Einträge haben noch keine Header/Größe gespeichert → bleibt ausgeblendet
             renderResponseInfo(entry.headers, entry.size, entry.truncatedAt);
             handleSuccess(entry.responseData, entry.truncatedAt);
+            responseOutput.append(trimNote);
         }
         scrollToResult();
     }
@@ -674,18 +731,136 @@ document.addEventListener('DOMContentLoaded', () => {
         downloadAnchor.remove();
     }
 
-    function saveHistoryToStorage() {
+    // Führt eine exportierte Historie mit der vorhandenen zusammen; doppelte Einträge (gleiche id) werden übersprungen
+    async function importHistoryFromJson(file) {
+        let entries;
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(requestHistory));
+            const parsed = JSON.parse(await file.text());
+            if (!Array.isArray(parsed)) throw new Error('Kein Array');
+            entries = parsed.map((raw, i) => normalizeHistoryEntry(raw, Date.now() - i)).filter(Boolean);
         } catch (e) {
-            console.error("Fehler beim Speichern im LocalStorage", e);
+            console.error("Fehler beim Import der Historie", e);
+            showImportMessage(`Import fehlgeschlagen: „${file.name}“ ist kein gültiger Historien-Export.`, true);
+            return;
         }
+        if (!entries.length) {
+            showImportMessage(`Import fehlgeschlagen: „${file.name}“ enthält keine Historien-Einträge.`, true);
+            return;
+        }
+
+        const knownIds = new Set(requestHistory.map(entry => entry.id));
+        const newEntries = entries.filter(entry => !knownIds.has(entry.id) && knownIds.add(entry.id));
+        const merged = [...requestHistory, ...newEntries].sort((a, b) => b.id - a.id);
+        requestHistory = merged.slice(0, MAX_HISTORY_ENTRIES);
+        const imported = newEntries.filter(entry => requestHistory.includes(entry)).length;
+        const duplicates = entries.length - newEntries.length;
+        const overflow = merged.length - requestHistory.length;
+
+        saveHistoryToStorage();
+        renderHistory();
+
+        const parts = [`${countLabel(imported, 'Eintrag', 'Einträge')} importiert`];
+        if (duplicates) parts.push(`${countLabel(duplicates, 'Eintrag war', 'Einträge waren')} schon vorhanden`);
+        if (overflow) parts.push(`die ältesten ${countLabel(overflow, 'Eintrag', 'Einträge')} fielen wegen des Limits von ${MAX_HISTORY_ENTRIES} weg`);
+        showImportMessage(parts.join(', ') + '.', false);
+    }
+
+    function countLabel(count, singular, plural) {
+        return `${count} ${count === 1 ? singular : plural}`;
+    }
+
+    // Prüft einen gespeicherten oder importierten Eintrag und bringt ihn in die Form von addToHistory
+    function normalizeHistoryEntry(raw, fallbackId) {
+        const payload = raw?.payload;
+        const method = typeof payload?.method === 'string' ? payload.method.toUpperCase() : '';
+        if (typeof payload?.url !== 'string' || !METHODS.includes(method)) return null;
+
+        const stringOr = (value, fallback) => typeof value === 'string' ? value : fallback;
+        const numberOr = (value, fallback) => Number.isFinite(value) ? value : fallback;
+        const customHeaders = payload.customHeaders && typeof payload.customHeaders === 'object' && !Array.isArray(payload.customHeaders)
+            ? Object.fromEntries(Object.entries(payload.customHeaders).map(([key, value]) => [key, String(value)]))
+            : {};
+
+        return trimBodyForHistory({
+            id: numberOr(raw.id, fallbackId),
+            time: stringOr(raw.time, ''),
+            payload: {
+                url: payload.url,
+                method,
+                body: stringOr(payload.body, ''),
+                copyHeaders: payload.copyHeaders !== false,
+                customHeaders
+            },
+            status: Number.isInteger(raw.status) ? raw.status : 0,
+            duration: numberOr(raw.duration, 0),
+            responseData: stringOr(raw.responseData, ''),
+            protocol: stringOr(raw.protocol, ''),
+            resolvedIp: stringOr(raw.resolvedIp, ''),
+            redirectChain: stringOr(raw.redirectChain, null),
+            headers: Array.isArray(raw.headers)
+                ? raw.headers.filter(h => Array.isArray(h) && h.length === 2).map(([name, value]) => [String(name), String(value)])
+                : null,
+            size: numberOr(raw.size, null),
+            truncatedAt: raw.truncatedAt == null ? null : String(raw.truncatedAt),
+            headerRows: Array.isArray(raw.headerRows)
+                ? raw.headerRows.filter(row => typeof row?.key === 'string')
+                    .map(row => ({ key: row.key, value: String(row.value ?? ''), enabled: row.enabled !== false }))
+                : null,
+            bodyTrimmedFrom: numberOr(raw.bodyTrimmedFrom, null)
+        });
+    }
+
+    function showImportMessage(text, isError) {
+        clearTimeout(importMessageTimer);
+        importMessage = { text, isError };
+        renderHistoryHint();
+        importMessageTimer = setTimeout(() => {
+            importMessage = null;
+            renderHistoryHint();
+        }, 8000);
+    }
+
+    function renderHistoryHint() {
+        const parts = [importMessage?.text, storageWarning].filter(Boolean);
+        historyHint.textContent = parts.join(' ');
+        historyHint.hidden = !parts.length;
+        historyHint.classList.toggle('is-error', Boolean(storageWarning || importMessage?.isError));
+    }
+
+    // Passt die Historie nicht in localStorage, werden nur die neuesten Einträge gespeichert
+    // und ein Hinweis angezeigt. Im Speicher bleibt die Historie bis zum Neuladen vollständig.
+    function saveHistoryToStorage() {
+        const serialized = requestHistory.map(entry => JSON.stringify(entry));
+        storageWarning = '';
+        for (let count = serialized.length; count >= 0; count--) {
+            try {
+                localStorage.setItem(STORAGE_KEY, `[${serialized.slice(0, count).join(',')}]`);
+                if (count < serialized.length) {
+                    storageWarning = count
+                        ? `Browser-Speicher voll: Nach einem Neuladen sind nur die neuesten ${count} von ${serialized.length} Einträgen noch da.`
+                        : 'Browser-Speicher voll: Die Historie geht beim Neuladen verloren.';
+                }
+                break;
+            } catch (e) {
+                if (!isQuotaError(e)) {
+                    console.error("Fehler beim Speichern im LocalStorage", e);
+                    storageWarning = 'Die Historie kann nicht gespeichert werden und geht beim Neuladen verloren.';
+                    break;
+                }
+            }
+        }
+        renderHistoryHint();
+    }
+
+    function isQuotaError(e) {
+        return e instanceof DOMException && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED');
     }
 
     function loadHistoryFromStorage() {
         try {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (saved) requestHistory = JSON.parse(saved);
+            const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]');
+            // Normalisieren kürzt auch Bodies von Einträgen, die vor der Längenbegrenzung gespeichert wurden
+            requestHistory = Array.isArray(saved) ? saved.map((raw, i) => normalizeHistoryEntry(raw, Date.now() - i)).filter(Boolean) : [];
         } catch (e) {
             console.error("Fehler beim Laden aus LocalStorage", e);
             requestHistory = [];

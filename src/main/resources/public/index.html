@@ -172,10 +172,27 @@
                 <div class="card-head">
                     <h6>Historie</h6>
                     <div class="btn-group">
+                        <button type="button" class="btn btn-sm btn-outline is-info" id="importHistoryBtn" title="Historie aus einer exportierten JSON-Datei importieren">Import</button>
                         <button type="button" class="btn btn-sm btn-outline is-success" id="exportHistoryBtn" title="Historie als JSON exportieren">Export</button>
                         <button type="button" class="btn btn-sm btn-outline is-danger" id="clearHistoryBtn" title="Gesamte Historie löschen">Leeren</button>
                     </div>
+                    <input type="file" id="importHistoryFile" accept=".json,application/json" hidden>
                 </div>
+                <div id="historyFilter" class="history-filter" hidden>
+                    <input type="search" id="historySearch" class="input input-sm" placeholder="URL durchsuchen…" aria-label="Historie nach URL durchsuchen">
+                    <select id="historyMethodFilter" class="input input-sm" aria-label="Historie nach Methode filtern">
+                        <option value="">Alle Methoden</option>
+                    </select>
+                    <select id="historyStatusFilter" class="input input-sm" aria-label="Historie nach Status filtern">
+                        <option value="">Alle Status</option>
+                        <option value="2">2xx</option>
+                        <option value="3">3xx</option>
+                        <option value="4">4xx</option>
+                        <option value="5">5xx</option>
+                        <option value="0">Netzwerkfehler</option>
+                    </select>
+                </div>
+                <p id="historyHint" class="hint history-hint" role="status" hidden></p>
                 <div id="emptyHistoryMsg" class="empty">Keine Anfragen aufgezeichnet</div>
                 <div id="historyList" class="history-list"></div>
             </div>
