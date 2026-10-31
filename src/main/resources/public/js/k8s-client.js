@@ -32,20 +32,20 @@ const K8sClient = (() => {
 
         configDiv.innerHTML = `
             <div class="d-flex align-items-center justify-content-between mb-2 px-1">
-                <span class="badge bg-secondary"><i class="bi bi-diagram-3 me-1"></i>${r.summary ?? ''}</span>
+                <span class="badge bg-secondary"><i class="bi bi-diagram-3 me-1"></i>${escapeHtml(r.summary)}</span>
                 <button class="btn btn-sm btn-outline-secondary x-small" onclick="this.closest('.d-flex').nextElementSibling.classList.toggle('d-none')">
                     <i class="bi bi-code-slash me-1"></i>Envoy Config (JSON)
                 </button>
             </div>
             <div class="d-none mb-2">
-                <pre class="x-small p-2" style="background:#1e1e1e;color:#4af626;border-radius:4px;max-height:300px;overflow:auto;">${JSON.stringify(r.envoyConfig, null, 2)}</pre>
+                <pre class="x-small p-2" style="background:#1e1e1e;color:#4af626;border-radius:4px;max-height:300px;overflow:auto;">${escapeHtml(JSON.stringify(r.envoyConfig, null, 2))}</pre>
             </div>
             <div class="input-group input-group-sm mb-2">
                 <span class="input-group-text bg-dark border-secondary text-secondary"><i class="bi bi-search"></i></span>
                 <input type="text" id="clusterSearch" class="form-control form-control-sm x-small bg-dark text-success border-secondary" placeholder="Cluster filtern...">
                 <span id="clusterCount" class="input-group-text bg-dark border-secondary text-secondary x-small">${clusterLines.length}</span>
             </div>
-            <pre id="clusterOutput" class="console x-small p-3 bg-dark text-success" style="border-radius:4px;max-height:400px;overflow:auto;">${clusterLines.join('\n')}</pre>`;
+            <pre id="clusterOutput" class="console x-small p-3 bg-dark text-success" style="border-radius:4px;max-height:400px;overflow:auto;">${escapeHtml(clusterLines.join('\n'))}</pre>`;
 
         document.getElementById('clusterSearch').addEventListener('input', function () {
             const term = this.value.toLowerCase();
@@ -87,14 +87,14 @@ const K8sClient = (() => {
             <div class="alert alert-danger py-2 px-3 mb-2">
                 <div class="d-flex align-items-center mb-1">
                     <i class="bi bi-crosshair me-2"></i>
-                    <span class="fw-bold small">ZIEL-KORRELATION – ${targetHostname}</span>
+                    <span class="fw-bold small">ZIEL-KORRELATION – ${escapeHtml(targetHostname)}</span>
                 </div>
                 <p class="mb-1 x-small">Envoy-Metriken direkt für das Ziel-Cluster gefunden:</p>
                 <table class="table table-sm x-small mb-0">
                     <tbody>${targetMetrics.map(([k, v]) => `
                         <tr>
-                            <td class="font-monospace text-truncate" style="max-width:280px;" title="${k}">${k}</td>
-                            <td class="${metricValueClass(k, v)}">${v}</td>
+                            <td class="font-monospace text-truncate" style="max-width:280px;" title="${escapeHtml(k)}">${escapeHtml(k)}</td>
+                            <td class="${metricValueClass(k, v)}">${escapeHtml(v)}</td>
                         </tr>`).join('')}
                     </tbody>
                 </table>
@@ -109,16 +109,16 @@ const K8sClient = (() => {
         const diagnosisHtml = diagnoses.map(d => {
             const cfg = severityConfig[d.severity] ?? { cls: 'secondary', icon: 'bi-question-circle' };
             const metricsHtml = d.affectedMetrics.map(m =>
-                `<code class="d-block x-small text-truncate" style="max-width:100%;" title="${m}">${m}</code>`
+                `<code class="d-block x-small text-truncate" style="max-width:100%;" title="${escapeHtml(m)}">${escapeHtml(m)}</code>`
             ).join('');
             return `
             <div class="alert alert-${cfg.cls} py-2 px-3 mb-2">
                 <div class="d-flex align-items-center mb-1">
                     <i class="bi ${cfg.icon} me-2"></i>
-                    <span class="fw-bold small">${d.severity} – ${d.title}</span>
+                    <span class="fw-bold small">${escapeHtml(d.severity)} – ${escapeHtml(d.title)}</span>
                 </div>
-                <p class="mb-1 x-small">${d.description}</p>
-                <p class="mb-1 x-small"><strong>Empfehlung:</strong> ${d.recommendation}</p>
+                <p class="mb-1 x-small">${escapeHtml(d.description)}</p>
+                <p class="mb-1 x-small"><strong>Empfehlung:</strong> ${escapeHtml(d.recommendation)}</p>
                 <details class="x-small mt-1">
                     <summary class="text-muted" style="cursor:pointer;">Betroffene Metriken (${d.affectedMetrics.length})</summary>
                     <div class="mt-1">${metricsHtml}</div>
@@ -132,8 +132,8 @@ const K8sClient = (() => {
                 <thead><tr><th>Metrik</th><th>Wert</th></tr></thead>
                 <tbody>${errorEntries.map(([k, v]) => `
                     <tr>
-                        <td class="font-monospace text-truncate" style="max-width:300px;" title="${k}">${k}</td>
-                        <td class="${metricValueClass(k, v)}">${v}</td>
+                        <td class="font-monospace text-truncate" style="max-width:300px;" title="${escapeHtml(k)}">${escapeHtml(k)}</td>
+                        <td class="${metricValueClass(k, v)}">${escapeHtml(v)}</td>
                     </tr>`).join('')}
                 </tbody>
             </table>`;
@@ -142,7 +142,7 @@ const K8sClient = (() => {
             errorDiv.innerHTML = `<div class="alert alert-success small"><i class="bi bi-check-circle me-2"></i>Keine aktiven Fehler-Metriken.</div>`;
         } else {
             errorDiv.innerHTML = `
-                <div class="mb-2"><span class="badge bg-secondary">${errorCount} Metriken</span></div>
+                <div class="mb-2"><span class="badge bg-secondary">${escapeHtml(errorCount)} Metriken</span></div>
                 ${targetHtml}
                 ${diagnosisHtml}
                 ${tableHtml}`;
@@ -157,7 +157,7 @@ const K8sClient = (() => {
         const istioDetails = context.istioDetails;
 
         const contextRows = context.error
-            ? `<tr><td colspan="2"><div class="alert alert-warning x-small m-0">${context.error}</div></td></tr>`
+            ? `<tr><td colspan="2"><div class="alert alert-warning x-small m-0">${escapeHtml(context.error)}</div></td></tr>`
             : Object.entries(context)
                 .filter(([key]) => key !== 'istioDetails')
                 .map(([key, val]) => {
@@ -169,8 +169,8 @@ const K8sClient = (() => {
                     }
                     return `
                     <tr>
-                        <td class="bg-light fw-bold small text-muted w-25">${key}</td>
-                        <td><span class="badge ${badgeClass} font-monospace">${displayVal}</span></td>
+                        <td class="bg-light fw-bold small text-muted w-25">${escapeHtml(key)}</td>
+                        <td><span class="badge ${badgeClass} font-monospace">${escapeHtml(displayVal)}</span></td>
                     </tr>`;
                 }).join('');
 
@@ -181,11 +181,11 @@ const K8sClient = (() => {
                 ? (val ? 'bg-success text-white' : 'bg-danger text-white')
                 : 'bg-light text-dark border';
             const cellContent = Array.isArray(val)
-                ? val.map(v => `<span class="badge ${badgeClass} font-monospace me-1 mb-1">${v}</span>`).join('')
-                : `<span class="badge ${badgeClass} font-monospace">${String(val)}</span>`;
+                ? val.map(v => `<span class="badge ${badgeClass} font-monospace me-1 mb-1">${escapeHtml(v)}</span>`).join('')
+                : `<span class="badge ${badgeClass} font-monospace">${escapeHtml(String(val))}</span>`;
             return `
             <tr>
-                <td class="bg-light fw-bold small text-muted w-25">${key}</td>
+                <td class="bg-light fw-bold small text-muted w-25">${escapeHtml(key)}</td>
                 <td>${cellContent}</td>
             </tr>`;
         }).join('') : '';
@@ -205,7 +205,7 @@ const K8sClient = (() => {
 
             <div class="d-none mt-3">
                 <label class="x-small fw-bold text-muted mb-1">KOMPLETTER KONTEXT (RAW):</label>
-                <pre class="x-small p-3" style="background-color:#1e1e1e;color:#4af626;border-radius:6px;border:1px solid #333;overflow:auto;max-height:500px;font-family:'Fira Code',monospace;">${JSON.stringify(context, null, 4)}</pre>
+                <pre class="x-small p-3" style="background-color:#1e1e1e;color:#4af626;border-radius:6px;border:1px solid #333;overflow:auto;max-height:500px;font-family:'Fira Code',monospace;">${escapeHtml(JSON.stringify(context, null, 4))}</pre>
             </div>
 
             ${istioDetailsHtml}
@@ -227,7 +227,7 @@ const K8sClient = (() => {
     function renderIstioSidecarDetails(istioDetails) {
         if (!istioDetails) return '';
         if (istioDetails.error) {
-            return `<div class="alert alert-warning x-small mt-3">${istioDetails.error}</div>`;
+            return `<div class="alert alert-warning x-small mt-3">${escapeHtml(istioDetails.error)}</div>`;
         }
         return `
         <div class="border-top pt-3 mt-3">
@@ -236,7 +236,7 @@ const K8sClient = (() => {
                 <tbody>
                     <tr>
                         <td class="bg-light fw-bold text-muted w-25">clusterSummary</td>
-                        <td><span class="badge bg-secondary font-monospace">${istioDetails.clusterSummary ?? '-'}</span></td>
+                        <td><span class="badge bg-secondary font-monospace">${escapeHtml(istioDetails.clusterSummary ?? '-')}</span></td>
                     </tr>
                 </tbody>
             </table>
@@ -246,8 +246,8 @@ const K8sClient = (() => {
                 <thead><tr><th>Metrik</th><th>Wert</th></tr></thead>
                 <tbody>${Object.entries(istioDetails.networkStats).map(([k, v]) => `
                     <tr>
-                        <td class="font-monospace" title="${k}">${k}</td>
-                        <td>${v}</td>
+                        <td class="font-monospace" title="${escapeHtml(k)}">${escapeHtml(k)}</td>
+                        <td>${escapeHtml(v)}</td>
                     </tr>`).join('')}
                 </tbody>
             </table>` : ''}
@@ -256,7 +256,7 @@ const K8sClient = (() => {
                 <i class="bi bi-info-circle me-1"></i>Server Info (JSON)
             </button>
             <div class="d-none mb-2">
-                <pre class="x-small p-2" style="background:#1e1e1e;color:#4af626;border-radius:4px;max-height:200px;overflow:auto;">${JSON.stringify(istioDetails.info, null, 2)}</pre>
+                <pre class="x-small p-2" style="background:#1e1e1e;color:#4af626;border-radius:4px;max-height:200px;overflow:auto;">${escapeHtml(JSON.stringify(istioDetails.info, null, 2))}</pre>
             </div>` : ''}
         </div>`;
     }
@@ -336,14 +336,14 @@ const K8sClient = (() => {
                         <div class="border rounded mb-1 ${borderClass}">
                             <button class="btn btn-sm w-100 text-start x-small d-flex justify-content-between align-items-center px-2 py-1"
                                     onclick="document.getElementById('${id}').classList.toggle('d-none')">
-                                <span class="font-monospace">${name}${matchBadge}</span>
+                                <span class="font-monospace">${escapeHtml(name)}${matchBadge}</span>
                                 <i class="bi bi-chevron-down text-muted"></i>
                             </button>
-                            <pre id="${id}" class="${isMatched ? '' : 'd-none'} x-small m-0 p-2" style="background:#1e1e1e;color:#4af626;border-radius:0 0 4px 4px;max-height:300px;overflow:auto;">${JSON.stringify(item, null, 2)}</pre>
+                            <pre id="${id}" class="${isMatched ? '' : 'd-none'} x-small m-0 p-2" style="background:#1e1e1e;color:#4af626;border-radius:0 0 4px 4px;max-height:300px;overflow:auto;">${escapeHtml(JSON.stringify(item, null, 2))}</pre>
                         </div>`;
                     }).join('');
                     const nsLabel = namespaces.length > 1
-                        ? `<div class="x-small text-muted mb-1 mt-2"><code>${ns}</code></div>` : '';
+                        ? `<div class="x-small text-muted mb-1 mt-2"><code>${escapeHtml(ns)}</code></div>` : '';
                     return nsLabel + itemCards;
                 }).join('');
 
@@ -355,7 +355,7 @@ const K8sClient = (() => {
                         ${countBadge}
                     </div>
                     ${totalCount === 0
-                        ? `<div class="text-muted x-small ps-1">Keine Ressourcen in Namespace${namespaces.length > 1 ? 's' : ''} ${namespaces.map(n => `<code>${n}</code>`).join(', ')}</div>`
+                        ? `<div class="text-muted x-small ps-1">Keine Ressourcen in Namespace${namespaces.length > 1 ? 's' : ''} ${namespaces.map(n => `<code>${escapeHtml(n)}</code>`).join(', ')}</div>`
                         : groupsHtml}
                 </div>`;
             }).join('');
@@ -364,18 +364,18 @@ const K8sClient = (() => {
                 ${renderCorrelation(correlation, targetUrl)}
                 <h6 class="x-small fw-bold text-uppercase text-muted mb-3 ${correlation ? 'mt-3 border-top pt-3' : ''}">
                     <i class="bi bi-list-ul me-1"></i>Istio Ressourcen
-                    ${namespaces.map(n => `<span class="badge bg-light text-dark border ms-1 fw-normal">${n}</span>`).join('')}
+                    ${namespaces.map(n => `<span class="badge bg-light text-dark border ms-1 fw-normal">${escapeHtml(n)}</span>`).join('')}
                 </h6>
                 ${cards}`;
 
         } catch (err) {
-            section.innerHTML = `<div class="alert alert-danger x-small">${err.message}</div>`;
+            section.innerHTML = `<div class="alert alert-danger x-small">${escapeHtml(err.message)}</div>`;
         }
     }
 
     function renderCorrelation(corr, targetUrl) {
         if (!corr || !targetUrl) return '';
-        if (corr.error) return `<div class="alert alert-warning x-small">Korrelation fehlgeschlagen: ${corr.error}</div>`;
+        if (corr.error) return `<div class="alert alert-warning x-small">Korrelation fehlgeschlagen: ${escapeHtml(corr.error)}</div>`;
 
         const vsMatches = corr.matchedVirtualServices ?? [];
         const drMatches = corr.matchedDestinationRules ?? [];
@@ -386,18 +386,18 @@ const K8sClient = (() => {
             const routeRows = routes.map(r => {
                 const icon = r.pathMatch ? 'bi-check-circle-fill text-success' : 'bi-dash-circle text-muted';
                 const dests = (r.destinations ?? []).map(d =>
-                    `<span class="badge bg-dark font-monospace me-1">${d.host}${d.subset ? ':' + d.subset : ''}${d.weight != null ? ' ' + d.weight + '%' : ''}</span>`
+                    `<span class="badge bg-dark font-monospace me-1">${escapeHtml(d.host)}${d.subset ? ':' + escapeHtml(d.subset) : ''}${d.weight != null ? ' ' + escapeHtml(d.weight) + '%' : ''}</span>`
                 ).join('');
                 const extras = [
-                    r.timeout ? `<span class="badge bg-secondary ms-1">timeout: ${r.timeout}</span>` : '',
-                    r.retries ? `<span class="badge bg-secondary ms-1">retries: ${JSON.stringify(r.retries)}</span>` : '',
+                    r.timeout ? `<span class="badge bg-secondary ms-1">timeout: ${escapeHtml(r.timeout)}</span>` : '',
+                    r.retries ? `<span class="badge bg-secondary ms-1">retries: ${escapeHtml(JSON.stringify(r.retries))}</span>` : '',
                     r.faultInjection ? `<span class="badge bg-warning text-dark ms-1">fault injection</span>` : '',
                 ].join('');
                 return `
                 <tr>
                     <td><i class="bi ${icon}"></i></td>
-                    <td class="x-small text-muted">${r.name ?? '—'}</td>
-                    <td class="x-small">${r.matchReason ?? ''}</td>
+                    <td class="x-small text-muted">${escapeHtml(r.name ?? '—')}</td>
+                    <td class="x-small">${escapeHtml(r.matchReason)}</td>
                     <td>${dests}${extras}</td>
                 </tr>`;
             }).join('');
@@ -410,8 +410,8 @@ const K8sClient = (() => {
 
             return `
             <div class="mb-2">
-                <div class="fw-bold x-small"><i class="bi bi-diagram-3 me-1"></i>${vs.name} ${pathBadge}</div>
-                <div class="x-small text-muted mb-1">Hosts: ${(vs.vsHosts ?? []).join(', ')}</div>
+                <div class="fw-bold x-small"><i class="bi bi-diagram-3 me-1"></i>${escapeHtml(vs.name)} ${pathBadge}</div>
+                <div class="x-small text-muted mb-1">Hosts: ${escapeHtml((vs.vsHosts ?? []).join(', '))}</div>
                 ${routes.length > 0 ? `
                 <table class="table table-sm table-borderless mb-0" style="font-size:0.68rem;">
                     <thead><tr><th></th><th>Route</th><th>Match</th><th>Destinations</th></tr></thead>
@@ -422,17 +422,17 @@ const K8sClient = (() => {
 
         const drHtml = drMatches.map(dr => {
             const subsets = (dr.subsets ?? []).map(s =>
-                `<span class="badge bg-dark font-monospace me-1">${s.name}: ${JSON.stringify(s.labels ?? {})}</span>`
+                `<span class="badge bg-dark font-monospace me-1">${escapeHtml(s.name)}: ${escapeHtml(JSON.stringify(s.labels ?? {}))}</span>`
             ).join('');
             const tp = dr.trafficPolicy;
             const tpItems = tp ? [
                 tp.connectionPool ? `<span class="badge bg-secondary me-1">connectionPool</span>` : '',
                 tp.outlierDetection ? `<span class="badge bg-secondary me-1">outlierDetection</span>` : '',
-                tp.loadBalancer ? `<span class="badge bg-secondary me-1">loadBalancer: ${tp.loadBalancer.simple ?? ''}</span>` : '',
+                tp.loadBalancer ? `<span class="badge bg-secondary me-1">loadBalancer: ${escapeHtml(tp.loadBalancer.simple)}</span>` : '',
             ].join('') : '';
             return `
             <div class="mb-2">
-                <div class="fw-bold x-small"><i class="bi bi-signpost-split me-1"></i>${dr.name}</div>
+                <div class="fw-bold x-small"><i class="bi bi-signpost-split me-1"></i>${escapeHtml(dr.name)}</div>
                 ${tpItems ? `<div class="x-small mb-1">Traffic Policy: ${tpItems}</div>` : ''}
                 ${subsets ? `<div class="x-small">Subsets: ${subsets}</div>` : ''}
             </div>`;
@@ -441,20 +441,20 @@ const K8sClient = (() => {
         const seMatches = corr.matchedServiceEntries ?? [];
         const seHtml = seMatches.map(se => {
             const ports = (se.ports ?? []).map(p =>
-                `<span class="badge bg-dark font-monospace me-1">${p.number}/${p.protocol ?? p.name ?? '?'}</span>`
+                `<span class="badge bg-dark font-monospace me-1">${escapeHtml(p.number)}/${escapeHtml(p.protocol ?? p.name ?? '?')}</span>`
             ).join('');
             const portWarning = se.portMatchWarning
-                ? `<div class="x-small text-warning mt-1"><i class="bi bi-exclamation-triangle me-1"></i>${se.portMatchWarning}</div>` : '';
+                ? `<div class="x-small text-warning mt-1"><i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(se.portMatchWarning)}</div>` : '';
             const portMatchBadge = se.portMatch === false
                 ? `<span class="badge bg-warning text-dark ms-1">Port nicht definiert</span>`
                 : se.portMatch === true ? `<span class="badge bg-success ms-1">Port-Match</span>` : '';
             return `
             <div class="mb-2">
-                <div class="fw-bold x-small"><i class="bi bi-plug me-1"></i>${se.name} ${portMatchBadge}</div>
-                <div class="x-small text-muted">Hosts: ${(se.seHosts ?? []).join(', ')}</div>
+                <div class="fw-bold x-small"><i class="bi bi-plug me-1"></i>${escapeHtml(se.name)} ${portMatchBadge}</div>
+                <div class="x-small text-muted">Hosts: ${escapeHtml((se.seHosts ?? []).join(', '))}</div>
                 <div class="x-small">
-                    ${se.location ? `<span class="badge bg-secondary me-1">${se.location}</span>` : ''}
-                    ${se.resolution ? `<span class="badge bg-secondary me-1">resolution: ${se.resolution}</span>` : ''}
+                    ${se.location ? `<span class="badge bg-secondary me-1">${escapeHtml(se.location)}</span>` : ''}
+                    ${se.resolution ? `<span class="badge bg-secondary me-1">resolution: ${escapeHtml(se.resolution)}</span>` : ''}
                     ${ports}
                 </div>
                 ${portWarning}
@@ -471,10 +471,10 @@ const K8sClient = (() => {
         const authzHtml = authz ? `
             <div class="mb-1 x-small fw-bold text-muted border-top pt-2 mt-1">AuthorizationPolicies</div>
             <div class="mb-2">
-                <span class="badge ${authzBlocked ? 'bg-danger' : 'bg-success'}">${authz.verdict}</span>
+                <span class="badge ${authzBlocked ? 'bg-danger' : 'bg-success'}">${escapeHtml(authz.verdict)}</span>
                 ${(authz.matchingPolicies ?? []).map(p => `
-                    <div class="x-small mt-1"><i class="bi bi-shield-lock me-1"></i>${p.name}
-                        <span class="badge ${p.action === 'DENY' ? 'bg-danger' : 'bg-secondary'} ms-1">${p.action}</span>
+                    <div class="x-small mt-1"><i class="bi bi-shield-lock me-1"></i>${escapeHtml(p.name)}
+                        <span class="badge ${p.action === 'DENY' ? 'bg-danger' : 'bg-secondary'} ms-1">${escapeHtml(p.action)}</span>
                         ${p.appliesToSource ? `<span class="badge bg-dark ms-1">gilt für Source</span>` : ''}
                     </div>`).join('')}
             </div>` : '';
@@ -483,7 +483,7 @@ const K8sClient = (() => {
         const peerAuthHtml = peerAuth.length > 0 ? `
             <div class="mb-1 x-small fw-bold text-muted border-top pt-2 mt-1">PeerAuthentications</div>
             <div class="mb-2">${peerAuth.map(p => `
-                <span class="badge bg-dark font-monospace me-1">${p.name}: mTLS ${p.mtlsMode}</span>`).join('')}
+                <span class="badge bg-dark font-monospace me-1">${escapeHtml(p.name)}: mTLS ${escapeHtml(p.mtlsMode)}</span>`).join('')}
             </div>` : '';
 
         const sidecarEgress = corr.sidecarEgress;
@@ -491,7 +491,7 @@ const K8sClient = (() => {
             <div class="mb-1 x-small fw-bold text-muted border-top pt-2 mt-1">Sidecar Egress-Scope (Source-Namespace)</div>
             <div class="mb-2">
                 <span class="badge ${sidecarEgress.hostAllowed ? 'bg-success' : 'bg-danger'}">${sidecarEgress.hostAllowed ? 'Host im Egress-Scope' : 'Host NICHT im Egress-Scope'}</span>
-                ${sidecarEgress.warning ? `<div class="x-small text-danger mt-1"><i class="bi bi-exclamation-triangle me-1"></i>${sidecarEgress.warning}</div>` : ''}
+                ${sidecarEgress.warning ? `<div class="x-small text-danger mt-1"><i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(sidecarEgress.warning)}</div>` : ''}
             </div>` : '';
 
         return `
@@ -500,11 +500,11 @@ const K8sClient = (() => {
                 <i class="bi bi-link-45deg text-primary"></i>
                 <span class="x-small fw-bold text-uppercase text-muted">URL-Korrelation</span>
                 ${summaryBadge}
-                <code class="x-small text-truncate" style="max-width:250px;" title="${targetUrl}">${targetUrl}</code>
+                <code class="x-small text-truncate" style="max-width:250px;" title="${escapeHtml(targetUrl)}">${escapeHtml(targetUrl)}</code>
             </div>
             ${corr.sourceNamespace && corr.targetNamespace ? `
-            <div class="x-small text-muted mb-2">Quelle: <code>${corr.sourceNamespace}</code> → Ziel: <code>${corr.targetNamespace}</code>
-                (abgefragte Namespaces: ${(corr.queriedNamespaces ?? []).map(n => `<code>${n}</code>`).join(', ')})</div>` : ''}
+            <div class="x-small text-muted mb-2">Quelle: <code>${escapeHtml(corr.sourceNamespace)}</code> → Ziel: <code>${escapeHtml(corr.targetNamespace)}</code>
+                (abgefragte Namespaces: ${(corr.queriedNamespaces ?? []).map(n => `<code>${escapeHtml(n)}</code>`).join(', ')})</div>` : ''}
             ${vsMatches.length > 0 ? `<div class="mb-1 x-small fw-bold text-muted">VirtualServices</div>${vsHtml}` : ''}
             ${drMatches.length > 0 ? `<div class="mb-1 x-small fw-bold text-muted border-top pt-2 mt-1">DestinationRules</div>${drHtml}` : ''}
             ${seMatches.length > 0 ? `<div class="mb-1 x-small fw-bold text-muted border-top pt-2 mt-1">ServiceEntries</div>${seHtml}` : ''}
@@ -546,7 +546,7 @@ const K8sClient = (() => {
                 ]);
 
                 if (report.error) {
-                    const warning = `<div class="alert alert-warning m-3 small"><i class="bi bi-exclamation-triangle me-2"></i>${report.error}</div>`;
+                    const warning = `<div class="alert alert-warning m-3 small"><i class="bi bi-exclamation-triangle me-2"></i>${escapeHtml(report.error)}</div>`;
                     configDiv.innerHTML = warning;
                     errorDiv.innerHTML  = `<div class="alert alert-warning m-3 small">Keine Daten – Sidecar nicht aktiv.</div>`;
                 } else {
@@ -558,7 +558,7 @@ const K8sClient = (() => {
                 loadIstioResources(context.namespace ?? 'default', targetUrl);
 
             } catch (err) {
-                const msg = `<div class="alert alert-danger m-2 small">Fehler: ${err.message}</div>`;
+                const msg = `<div class="alert alert-danger m-2 small">Fehler: ${escapeHtml(err.message)}</div>`;
                 [configDiv, errorDiv, resourceDiv].forEach(el => { if (el) el.innerHTML = msg; });
             }
         }
@@ -585,7 +585,7 @@ async function refreshEnvoyServiceSelect() {
     const options = services.map(s => {
         const url = `http://${s.host}:${s.port}`;
         const label = s.subset ? `${s.shortName} (${s.subset}) — ${url}` : `${s.shortName} — ${url}`;
-        return `<option value="${url}">${label}</option>`;
+        return `<option value="${escapeHtml(url)}">${escapeHtml(label)}</option>`;
     }).join('');
 
     select.innerHTML = `<option value="">-- über Envoy erreichbaren Service wählen --</option>${options}`;
@@ -600,8 +600,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const ctx = await K8sClient.loadContext();
     if (contextEl && !ctx.error) {
         contextEl.innerHTML = `
-            <span class="badge bg-dark border me-2"><i class="bi bi-cpu me-1"></i>${ctx.podName}</span>
-            <span class="badge bg-dark border me-2"><i class="bi bi-tags me-1"></i>${ctx.namespace}</span>
+            <span class="badge bg-dark border me-2"><i class="bi bi-cpu me-1"></i>${escapeHtml(ctx.podName)}</span>
+            <span class="badge bg-dark border me-2"><i class="bi bi-tags me-1"></i>${escapeHtml(ctx.namespace)}</span>
             <span class="badge ${ctx.istioSidecar ? 'bg-success' : 'bg-warning text-dark'}">Istio: ${ctx.istioSidecar ? 'ON' : 'OFF'}</span>`;
     }
 

@@ -107,8 +107,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const div = document.createElement('div');
         div.className = 'row g-2 mb-2 header-row';
         div.innerHTML = `
-            <div class="col-5"><input type="text" class="form-control form-control-sm h-key" placeholder="Key" value="${key}"></div>
-            <div class="col-6"><input type="text" class="form-control form-control-sm h-val" placeholder="Value" value="${value}"></div>
+            <div class="col-5"><input type="text" class="form-control form-control-sm h-key" placeholder="Key" value="${escapeHtml(key)}"></div>
+            <div class="col-6"><input type="text" class="form-control form-control-sm h-val" placeholder="Value" value="${escapeHtml(value)}"></div>
             <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger remove-header">✕</button></div>
         `;
         div.querySelector('.remove-header').onclick = () => div.remove();
@@ -149,12 +149,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const stepsHtml = steps.map((step, i) => `
             <div class="d-flex align-items-center flex-wrap gap-1">
-                ${i === 0 ? `<span class="badge bg-dark font-monospace x-small text-truncate" style="max-width:220px;" title="${step.from}">${step.from}</span>` : ''}
+                ${i === 0 ? `<span class="badge bg-dark font-monospace x-small text-truncate" style="max-width:220px;" title="${escapeHtml(step.from)}">${escapeHtml(step.from)}</span>` : ''}
                 <i class="bi bi-arrow-right text-muted"></i>
-                <span class="badge ${statusColor(step.status)}">${step.status}</span>
-                <span class="badge bg-secondary x-small">${step.proto}</span>
+                <span class="badge ${statusColor(step.status)}">${escapeHtml(step.status)}</span>
+                <span class="badge bg-secondary x-small">${escapeHtml(step.proto)}</span>
                 <i class="bi bi-arrow-right text-muted"></i>
-                <span class="badge bg-dark font-monospace x-small text-truncate" style="max-width:220px;" title="${step.to}">${step.to}</span>
+                <span class="badge bg-dark font-monospace x-small text-truncate" style="max-width:220px;" title="${escapeHtml(step.to)}">${escapeHtml(step.to)}</span>
             </div>`).join('<div class="my-1"></div>');
 
         redirectChainDiv.innerHTML = `
@@ -209,7 +209,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const tls = await res.json();
             tlsPanelDiv.innerHTML = renderTlsPanel(tls);
         } catch (e) {
-            tlsPanelDiv.innerHTML = `<div class="border rounded p-2 bg-light x-small text-danger">TLS-Inspektion fehlgeschlagen: ${e.message}</div>`;
+            tlsPanelDiv.innerHTML = `<div class="border rounded p-2 bg-light x-small text-danger">TLS-Inspektion fehlgeschlagen: ${escapeHtml(e.message)}</div>`;
         }
     }
 
@@ -217,7 +217,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (tls.error) return `
             <div class="border rounded p-2 bg-light">
                 <span class="x-small fw-bold text-uppercase text-muted"><i class="bi bi-shield-x me-1"></i>TLS</span>
-                <span class="ms-2 x-small text-danger">${tls.error}</span>
+                <span class="ms-2 x-small text-danger">${escapeHtml(tls.error)}</span>
             </div>`;
 
         const mtlsBadge = tls.isMtls
@@ -227,7 +227,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const spiffeRow = tls.spiffeId ? `
             <div class="mt-1 x-small">
                 <i class="bi bi-person-badge me-1 text-success"></i>
-                <code class="text-success">${tls.spiffeId}</code>
+                <code class="text-success">${escapeHtml(tls.spiffeId)}</code>
             </div>` : '';
 
         const chainHtml = (tls.chain ?? []).map((cert, i) => {
@@ -236,7 +236,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const typeBadge = { leaf: 'bg-primary', intermediate: 'bg-secondary', root: 'bg-dark' }[cert.type] ?? 'bg-secondary';
             const sans = (cert.subjectAltNames ?? []).map(s => {
                 const isSpiffe = s.startsWith('URI:spiffe://');
-                return `<span class="badge ${isSpiffe ? 'bg-success' : 'bg-light text-dark border'} font-monospace me-1 mb-1" style="font-size:0.65rem;">${s}</span>`;
+                return `<span class="badge ${isSpiffe ? 'bg-success' : 'bg-light text-dark border'} font-monospace me-1 mb-1" style="font-size:0.65rem;">${escapeHtml(s)}</span>`;
             }).join('');
             const id = `tls-cert-${i}`;
             return `
@@ -244,19 +244,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 <button class="btn btn-sm w-100 text-start x-small d-flex justify-content-between align-items-center px-2 py-1"
                         onclick="document.getElementById('${id}').classList.toggle('d-none')">
                     <span>
-                        <span class="badge ${typeBadge} me-1">${cert.type}</span>
-                        <span class="font-monospace">${cert.subject.split(',')[0]}</span>
+                        <span class="badge ${typeBadge} me-1">${escapeHtml(cert.type)}</span>
+                        <span class="font-monospace">${escapeHtml(cert.subject.split(',')[0])}</span>
                     </span>
-                    <span class="${expiredClass} x-small"><i class="bi ${expiredIcon} me-1"></i>${cert.expired ? 'ABGELAUFEN' : cert.daysUntilExpiry + 'd'}</span>
+                    <span class="${expiredClass} x-small"><i class="bi ${expiredIcon} me-1"></i>${cert.expired ? 'ABGELAUFEN' : escapeHtml(cert.daysUntilExpiry) + 'd'}</span>
                 </button>
                 <div id="${id}" class="d-none px-2 pb-2 x-small">
                     <table class="table table-sm table-borderless mb-1" style="font-size:0.7rem;">
                         <tbody>
-                            <tr><td class="text-muted w-25">Subject</td><td class="font-monospace">${cert.subject}</td></tr>
-                            <tr><td class="text-muted">Issuer</td><td class="font-monospace">${cert.issuer}</td></tr>
-                            <tr><td class="text-muted">Serial</td><td class="font-monospace">${cert.serial}</td></tr>
-                            <tr><td class="text-muted">Gültig von</td><td>${cert.validFrom}</td></tr>
-                            <tr><td class="text-muted">Gültig bis</td><td class="${expiredClass}">${cert.validTo}</td></tr>
+                            <tr><td class="text-muted w-25">Subject</td><td class="font-monospace">${escapeHtml(cert.subject)}</td></tr>
+                            <tr><td class="text-muted">Issuer</td><td class="font-monospace">${escapeHtml(cert.issuer)}</td></tr>
+                            <tr><td class="text-muted">Serial</td><td class="font-monospace">${escapeHtml(cert.serial)}</td></tr>
+                            <tr><td class="text-muted">Gültig von</td><td>${escapeHtml(cert.validFrom)}</td></tr>
+                            <tr><td class="text-muted">Gültig bis</td><td class="${expiredClass}">${escapeHtml(cert.validTo)}</td></tr>
                         </tbody>
                     </table>
                     ${sans ? `<div class="mb-1">${sans}</div>` : ''}
@@ -268,8 +268,8 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="border rounded p-2 bg-light">
             <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
                 <span class="x-small fw-bold text-uppercase text-muted"><i class="bi bi-shield-lock me-1"></i>TLS</span>
-                <span class="badge bg-info text-dark">${tls.tlsVersion ?? ''}</span>
-                <span class="badge bg-light text-dark border font-monospace" style="font-size:0.65rem;">${tls.cipherSuite ?? ''}</span>
+                <span class="badge bg-info text-dark">${escapeHtml(tls.tlsVersion)}</span>
+                <span class="badge bg-light text-dark border font-monospace" style="font-size:0.65rem;">${escapeHtml(tls.cipherSuite)}</span>
                 ${mtlsBadge}
             </div>
             ${spiffeRow}
@@ -321,13 +321,13 @@ document.addEventListener('DOMContentLoaded', () => {
             item.innerHTML = `
             <div class="flex-grow-1 p-2 cursor-pointer">
                 <div class="d-flex justify-content-between">
-                    <strong class="small">${entry.payload.method}</strong>
-                    <small class="text-muted" style="font-size: 0.7rem;">${entry.time}</small>
+                    <strong class="small">${escapeHtml(entry.payload.method)}</strong>
+                    <small class="text-muted" style="font-size: 0.7rem;">${escapeHtml(entry.time)}</small>
                 </div>
-                <div class="text-truncate x-small text-muted" style="max-width: 180px;">${entry.payload.url}</div>
+                <div class="text-truncate x-small text-muted" style="max-width: 180px;">${escapeHtml(entry.payload.url)}</div>
                 <div class="mt-1">
-                    <span class="badge ${isErr ? 'bg-danger' : 'bg-success'}" style="font-size: 0.65rem;">${entry.status}</span> 
-                    <small class="x-small">${entry.duration}ms</small>
+                    <span class="badge ${isErr ? 'bg-danger' : 'bg-success'}" style="font-size: 0.65rem;">${escapeHtml(entry.status)}</span>
+                    <small class="x-small">${escapeHtml(entry.duration)}ms</small>
                 </div>
             </div>
             <button class="btn btn-sm text-danger opacity-50 px-2 delete-history-item" title="Löschen">
