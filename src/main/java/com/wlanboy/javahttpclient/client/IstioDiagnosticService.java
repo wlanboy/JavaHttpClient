@@ -1,9 +1,30 @@
 package com.wlanboy.javahttpclient.client;
 
+import com.wlanboy.javahttpclient.client.dto.K8sContext;
+import com.wlanboy.javahttpclient.client.dto.K8sContext.EnvoyDetails;
+import com.wlanboy.javahttpclient.client.dto.K8sStatus;
+import com.wlanboy.javahttpclient.client.dto.ReachableService;
+import com.wlanboy.javahttpclient.client.dto.SidecarReport;
+import com.wlanboy.javahttpclient.client.dto.SidecarReport.ConfigDumpTruncated;
+import com.wlanboy.javahttpclient.client.dto.SidecarReport.Diagnosis;
+import com.wlanboy.javahttpclient.client.dto.SidecarReport.HealthDiagnostics;
+import com.wlanboy.javahttpclient.client.dto.SidecarReport.Reachability;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.AuthorizationAnalysis;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.DestinationRuleMatch;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.HttpRouteAnalysis;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.PeerAuthenticationMatch;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.PolicyMatch;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.RouteDestination;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.ServiceEntryMatch;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.SidecarEgress;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.Subset;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.VirtualServiceMatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.json.JsonParserFactory;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.unit.DataSize;
@@ -61,67 +82,45 @@ public class IstioDiagnosticService {
         logger.info("Istio Diagnostic Service initialisiert (K8s API verfügbar: {}).", k8sClientService.isInitialized());
     }
 
-    public Map<String, Object> getK8sStatus() {
-        Map<String, Object> status = new LinkedHashMap<>();
-        status.put("initialized", k8sClientService.isInitialized());
-        status.put("supportedIstioTypes", SUPPORTED_ISTIO_TYPES);
-        status.put("istioVersionsProbed", ISTIO_VERSIONS);
-        if (k8sClientService.getInitError() != null) {
-            status.put("initError", k8sClientService.getInitError());
-        }
-        return status;
+    public K8sStatus getK8sStatus() {
+        return new K8sStatus(k8sClientService.isInitialized(), SUPPORTED_ISTIO_TYPES, ISTIO_VERSIONS,
+                k8sClientService.getInitError());
     }
 
-    public Map<String, Object> getContext() {
-        Map<String, Object> details = new HashMap<>();
+    public K8sContext getContext() {
         boolean istioPresent = checkIstioSidecar();
-
-        details.put("podName", System.getenv().getOrDefault("HOSTNAME", "unknown"));
-        details.put("namespace", k8sClientService.getCurrentNamespace());
-        details.put("istioSidecar", istioPresent);
-
-        if (istioPresent) {
-            details.put("istioDetails", getEnvoyDetails());
-        }
-
-        return details;
+        return new K8sContext(
+                System.getenv().getOrDefault("HOSTNAME", "unknown"),
+                k8sClientService.getCurrentNamespace(),
+                istioPresent,
+                istioPresent ? getEnvoyDetails() : null);
     }
 
-    public Map<String, Object> getFullSidecarDetails() {
-        Map<String, Object> report = new LinkedHashMap<>();
-
+    public SidecarReport getFullSidecarDetails() {
         if (!checkIstioSidecar()) {
-            report.put("error", "Istio Sidecar Proxy ist nicht aktiv (" + sidecarStatusHost + ":" + sidecarStatusPort
+            return SidecarReport.error("Istio Sidecar Proxy ist nicht aktiv (" + sidecarStatusHost + ":" + sidecarStatusPort
                     + " nicht erreichbar).");
-            return report;
         }
 
+        Reachability reachability = null;
         try {
             // Sektion A: Erreichbarkeit
-            Map<String, Object> reachability = new HashMap<>();
-            reachability.put("envoyConfig", fetchConfigDump());
+            Object envoyConfig = fetchConfigDump();
             String clusters = restClient.get().uri("/clusters").retrieve().body(String.class);
-            reachability.put("activeEndpoints", clusters);
-            reachability.put("summary", summarizeClusters(clusters));
-            report.put("reachability", reachability);
+            reachability = new Reachability(envoyConfig, clusters, summarizeClusters(clusters));
 
             // Sektion B: Gesundheit & Fehler
-            Map<String, Object> health = new HashMap<>();
             String rawStats = restClient.get().uri("/stats").retrieve().body(String.class);
             Map<String, String> activeErrors = parseStats(rawStats, false);
             // xds-grpc ist interne Istio Control-Plane – kein App-Traffic, rausfiltern
             activeErrors.entrySet().removeIf(e -> e.getKey().startsWith("cluster.xds-grpc"));
-            health.put("activeErrorMetrics", activeErrors);
-            health.put("errorCount", activeErrors.size());
-            health.put("diagnoses", diagnoseMetrics(activeErrors));
-            report.put("healthDiagnostics", health);
+            HealthDiagnostics health = new HealthDiagnostics(activeErrors, activeErrors.size(), diagnoseMetrics(activeErrors));
 
-            report.put("timestamp", java.time.Instant.now().toString());
+            return new SidecarReport(reachability, health, java.time.Instant.now().toString(), null);
         } catch (Exception e) {
             logger.error("Fehler beim Abruf der Envoy-Details: {}", e.getMessage());
-            report.put("error", "Envoy Admin API Fehler: " + e.getMessage());
+            return new SidecarReport(reachability, null, null, "Envoy Admin API Fehler: " + e.getMessage());
         }
-        return report;
     }
 
     /**
@@ -140,13 +139,9 @@ public class IstioDiagnosticService {
             }
             if (bytes.length > maxBytes) {
                 logger.warn("Envoy config_dump größer als {}, wird nicht geparst", maxConfigDumpSize);
-                Map<String, Object> hint = new LinkedHashMap<>();
-                hint.put("truncated", true);
-                hint.put("maxBytes", maxBytes);
-                hint.put("error", "config_dump ist größer als " + maxConfigDumpSize
+                return new ConfigDumpTruncated(true, maxBytes, "config_dump ist größer als " + maxConfigDumpSize
                         + " und wurde nicht geladen. Limit über istio.envoy.config-dump.max-size anpassen"
                         + " oder gefiltert abrufen (z. B. /config_dump?resource=dynamic_active_clusters).");
-                return hint;
             }
             return JsonParserFactory.getJsonParser().parseMap(new String(bytes, StandardCharsets.UTF_8));
         });
@@ -158,8 +153,8 @@ public class IstioDiagnosticService {
      * Parst die Envoy Admin API (/clusters) und liefert alle über den Sidecar
      * erreichbaren Outbound-Services (Host + Port), für das Service-Dropdown im UI.
      */
-    public List<Map<String, Object>> getReachableServices() {
-        Map<String, Map<String, Object>> byKey = new LinkedHashMap<>();
+    public List<ReachableService> getReachableServices() {
+        Map<String, ReachableService> byKey = new LinkedHashMap<>();
         try {
             String clusters = restClient.get().uri("/clusters").retrieve().body(String.class);
             if (clusters == null) return List.of();
@@ -178,40 +173,34 @@ public class IstioDiagnosticService {
                 String key = host + ":" + port + ":" + subset;
                 if (byKey.containsKey(key)) continue;
 
-                Map<String, Object> svc = new LinkedHashMap<>();
-                svc.put("host", host);
-                svc.put("port", Integer.parseInt(port));
-                svc.put("shortName", host.split("\\.")[0]);
-                if (!subset.isBlank()) svc.put("subset", subset);
-                byKey.put(key, svc);
+                byKey.put(key, new ReachableService(host, Integer.parseInt(port), host.split("\\.")[0],
+                        subset.isBlank() ? null : subset));
             }
         } catch (Exception e) {
             logger.warn("Konnte Envoy Cluster-Liste für Service-Dropdown nicht abrufen: {}", e.getMessage());
         }
 
-        List<Map<String, Object>> services = new ArrayList<>(byKey.values());
-        services.sort(Comparator.comparing(s -> (String) s.get("host")));
+        List<ReachableService> services = new ArrayList<>(byKey.values());
+        services.sort(Comparator.comparing(ReachableService::host));
         return services;
     }
 
-    private Map<String, Object> getEnvoyDetails() {
-        Map<String, Object> envoy = new HashMap<>();
+    private EnvoyDetails getEnvoyDetails() {
         try {
-            envoy.put("info", restClient.get().uri("/server_info").retrieve().body(Map.class));
+            Map<String, Object> info = restClient.get().uri("/server_info").retrieve()
+                    .body(new ParameterizedTypeReference<>() {});
 
             String clusters = restClient.get().uri("/clusters").retrieve().body(String.class);
-            envoy.put("clusterSummary", summarizeClusters(clusters));
 
             String stats = restClient.get()
                     .uri("/stats?filter=cluster.*.upstream_rq_(5xx|timeout|retry)")
                     .retrieve()
                     .body(String.class);
-            envoy.put("networkStats", parseStats(stats, false));
 
+            return new EnvoyDetails(info, summarizeClusters(clusters), parseStats(stats, false), null);
         } catch (Exception e) {
-            envoy.put("error", "Envoy Admin API nicht erreichbar: " + e.getMessage());
+            return EnvoyDetails.error("Envoy Admin API nicht erreichbar: " + e.getMessage());
         }
-        return envoy;
     }
 
     private static final Pattern K8S_FQDN_PATTERN =
@@ -227,8 +216,7 @@ public class IstioDiagnosticService {
         return m.matches() ? m.group(1) : sourceNamespace;
     }
 
-    public Map<String, Object> correlateUrl(String url, String sourceNamespace) {
-        Map<String, Object> result = new LinkedHashMap<>();
+    public UrlCorrelation correlateUrl(String url, String sourceNamespace) {
         try {
             URI uri = URI.create(url);
             String host = uri.getHost();
@@ -239,64 +227,64 @@ public class IstioDiagnosticService {
                     ? List.of(sourceNamespace)
                     : List.of(sourceNamespace, targetNamespace);
 
-            result.put("requestedHost", host);
-            result.put("requestedPath", path);
-            result.put("sourceNamespace", sourceNamespace);
-            result.put("targetNamespace", targetNamespace);
-            result.put("queriedNamespaces", namespaces);
-
-            List<Map<String, Object>> matchedVs = new ArrayList<>();
+            List<VirtualServiceMatch> matchedVs = new ArrayList<>();
             for (String ns : namespaces) {
                 for (Object vsObj : getIstioResources(ns, "virtualservices")) {
                     if (!(vsObj instanceof Map<?, ?> vs)) continue;
-                    Map<String, Object> analysis = analyzeVirtualService(vs, host, path, port);
-                    if (Boolean.TRUE.equals(analysis.get("hostMatch"))) {
-                        analysis.put("namespace", ns);
-                        matchedVs.add(analysis);
-                    }
+                    VirtualServiceMatch analysis = analyzeVirtualService(vs, ns, host, path, port);
+                    if (analysis.hostMatch()) matchedVs.add(analysis);
                 }
             }
 
-            List<Map<String, Object>> matchedDrs = new ArrayList<>();
+            List<DestinationRuleMatch> matchedDrs = new ArrayList<>();
             for (String ns : namespaces) {
                 for (Object drObj : getIstioResources(ns, "destinationrules")) {
                     if (!(drObj instanceof Map<?, ?> dr)) continue;
-                    Map<String, Object> analysis = analyzeDestinationRule(dr, host);
-                    if (Boolean.TRUE.equals(analysis.get("hostMatch"))) {
-                        analysis.put("namespace", ns);
-                        matchedDrs.add(analysis);
-                    }
+                    DestinationRuleMatch analysis = analyzeDestinationRule(dr, ns, host);
+                    if (analysis.hostMatch()) matchedDrs.add(analysis);
                 }
             }
 
-            List<Map<String, Object>> matchedSes = new ArrayList<>();
+            List<ServiceEntryMatch> matchedSes = new ArrayList<>();
             for (String ns : namespaces) {
                 for (Object seObj : getIstioResources(ns, "serviceentries")) {
                     if (!(seObj instanceof Map<?, ?> se)) continue;
-                    Map<String, Object> analysis = analyzeServiceEntry(se, host, port);
-                    if (Boolean.TRUE.equals(analysis.get("hostMatch"))) {
-                        analysis.put("namespace", ns);
-                        matchedSes.add(analysis);
-                    }
+                    ServiceEntryMatch analysis = analyzeServiceEntry(se, ns, host, port);
+                    if (analysis.hostMatch()) matchedSes.add(analysis);
                 }
             }
 
             String targetShortName = host != null ? host.split("\\.")[0] : null;
-            Map<String, Object> authz = analyzeAuthorizationPolicies(targetNamespace, targetShortName, sourceNamespace);
-            List<Map<String, Object>> peerAuth = analyzePeerAuthentications(targetNamespace, targetShortName);
-            Map<String, Object> sidecarEgress = analyzeSidecarEgress(sourceNamespace, host);
-
-            result.put("matchedVirtualServices", matchedVs);
-            result.put("matchedDestinationRules", matchedDrs);
-            result.put("matchedServiceEntries", matchedSes);
-            result.put("authorizationPolicies", authz);
-            result.put("peerAuthentications", peerAuth);
-            result.put("sidecarEgress", sidecarEgress);
-            result.put("hasMatch", !matchedVs.isEmpty() || !matchedDrs.isEmpty() || !matchedSes.isEmpty());
+            return new UrlCorrelation(
+                    host,
+                    path,
+                    sourceNamespace,
+                    targetNamespace,
+                    namespaces,
+                    matchedVs,
+                    matchedDrs,
+                    matchedSes,
+                    analyzeAuthorizationPolicies(targetNamespace, targetShortName, sourceNamespace),
+                    analyzePeerAuthentications(targetNamespace, targetShortName),
+                    analyzeSidecarEgress(sourceNamespace, host),
+                    !matchedVs.isEmpty() || !matchedDrs.isEmpty() || !matchedSes.isEmpty(),
+                    null);
         } catch (Exception e) {
-            result.put("error", e.getMessage());
+            return UrlCorrelation.error(e.getMessage());
         }
-        return result;
+    }
+
+    private static String nameOf(Map<?, ?> resource) {
+        if (!(resource.get("metadata") instanceof Map<?, ?> metadata) || metadata.get("name") == null) return "?";
+        return metadata.get("name").toString();
+    }
+
+    private static String stringOrNull(Object value) {
+        return value != null ? value.toString() : null;
+    }
+
+    private static List<String> toStringList(List<?> values) {
+        return values.stream().map(Object::toString).toList();
     }
 
     /**
@@ -304,27 +292,21 @@ public class IstioDiagnosticService {
      * ermittelt, ob der Source-Namespace laut Policy blockiert wird (DENY) oder – bei
      * vorhandenen ALLOW-Policies für den Workload – nicht in der Allow-Liste steht.
      */
-    private Map<String, Object> analyzeAuthorizationPolicies(String targetNamespace, String targetShortName, String sourceNamespace) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        List<Map<String, Object>> matchingPolicies = new ArrayList<>();
+    private AuthorizationAnalysis analyzeAuthorizationPolicies(String targetNamespace, String targetShortName, String sourceNamespace) {
+        List<PolicyMatch> matchingPolicies = new ArrayList<>();
         boolean deniedBySpecificRule = false;
         boolean hasAllowPolicy = false;
         boolean allowedBySpecificRule = false;
 
         for (Object obj : getIstioResources(targetNamespace, "authorizationpolicies")) {
             if (!(obj instanceof Map<?, ?> ap)) continue;
-            Map<?, ?> metadata = (Map<?, ?>) ap.get("metadata");
             Map<?, ?> spec = (Map<?, ?>) ap.get("spec");
             if (spec == null || !selectorMatches(spec, targetShortName)) continue;
 
             String action = spec.get("action") != null ? spec.get("action").toString() : "ALLOW";
             boolean sourceMatches = ruleMatchesSourceNamespace(spec, sourceNamespace);
 
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("name", metadata != null ? metadata.get("name") : "?");
-            entry.put("action", action);
-            entry.put("appliesToSource", sourceMatches);
-            matchingPolicies.add(entry);
+            matchingPolicies.add(new PolicyMatch(nameOf(ap), action, sourceMatches));
 
             if ("DENY".equalsIgnoreCase(action)) {
                 if (sourceMatches) deniedBySpecificRule = true;
@@ -334,7 +316,6 @@ public class IstioDiagnosticService {
             }
         }
 
-        result.put("matchingPolicies", matchingPolicies);
         String verdict;
         if (deniedBySpecificRule) {
             verdict = "BLOCKED – DENY-Policy greift für Source-Namespace '" + sourceNamespace + "'";
@@ -343,8 +324,7 @@ public class IstioDiagnosticService {
         } else {
             verdict = "ALLOWED – keine blockierende AuthorizationPolicy gefunden";
         }
-        result.put("verdict", verdict);
-        return result;
+        return new AuthorizationAnalysis(matchingPolicies, verdict);
     }
 
     private boolean selectorMatches(Map<?, ?> spec, String targetShortName) {
@@ -373,19 +353,18 @@ public class IstioDiagnosticService {
         return false;
     }
 
-    private List<Map<String, Object>> analyzePeerAuthentications(String targetNamespace, String targetShortName) {
-        List<Map<String, Object>> results = new ArrayList<>();
+    private List<PeerAuthenticationMatch> analyzePeerAuthentications(String targetNamespace, String targetShortName) {
+        List<PeerAuthenticationMatch> results = new ArrayList<>();
         for (Object obj : getIstioResources(targetNamespace, "peerauthentications")) {
             if (!(obj instanceof Map<?, ?> pa)) continue;
-            Map<?, ?> metadata = (Map<?, ?>) pa.get("metadata");
             Map<?, ?> spec = (Map<?, ?>) pa.get("spec");
             if (spec == null || !selectorMatches(spec, targetShortName)) continue;
 
             Map<?, ?> mtls = (Map<?, ?>) spec.get("mtls");
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("name", metadata != null ? metadata.get("name") : "?");
-            entry.put("mtlsMode", mtls != null && mtls.get("mode") != null ? mtls.get("mode") : "UNSET (erbt Mesh/Namespace-Default)");
-            results.add(entry);
+            String mtlsMode = mtls != null && mtls.get("mode") != null
+                    ? mtls.get("mode").toString()
+                    : "UNSET (erbt Mesh/Namespace-Default)";
+            results.add(new PeerAuthenticationMatch(nameOf(pa), mtlsMode));
         }
         return results;
     }
@@ -395,13 +374,11 @@ public class IstioDiagnosticService {
      * beschränkt (egress-Scoping). Ist der Ziel-Host nicht im Scope, hat der Sidecar
      * keine Cluster-Config dafür – der Request scheitert unabhängig von VS/DR/AuthorizationPolicy.
      */
-    private Map<String, Object> analyzeSidecarEgress(String sourceNamespace, String targetHost) {
-        Map<String, Object> result = new LinkedHashMap<>();
+    private SidecarEgress analyzeSidecarEgress(String sourceNamespace, String targetHost) {
         List<Object> sidecars = getIstioResources(sourceNamespace, "sidecars");
         if (sidecars.isEmpty()) {
-            result.put("restricted", false);
-            result.put("info", "Kein Sidecar-Resource im Source-Namespace – kein Egress-Scoping aktiv.");
-            return result;
+            return new SidecarEgress(false, "Kein Sidecar-Resource im Source-Namespace – kein Egress-Scoping aktiv.",
+                    null, null, null);
         }
 
         List<String> checkedHosts = new ArrayList<>();
@@ -430,51 +407,38 @@ public class IstioDiagnosticService {
                 }
             }
         }
-        result.put("restricted", true);
-        result.put("hostAllowed", hostAllowed);
-        result.put("checkedEgressHosts", checkedHosts);
-        if (!hostAllowed) {
-            result.put("warning", "Ziel-Host ist nicht im Sidecar-Egress-Scope des Source-Namespace – Envoy hat evtl. keine Cluster-Config dafür.");
-        }
-        return result;
+        String warning = hostAllowed ? null
+                : "Ziel-Host ist nicht im Sidecar-Egress-Scope des Source-Namespace – Envoy hat evtl. keine Cluster-Config dafür.";
+        return new SidecarEgress(true, null, hostAllowed, checkedHosts, warning);
     }
 
-    private Map<String, Object> analyzeVirtualService(Map<?, ?> vs, String targetHost, String targetPath, int targetPort) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        Map<?, ?> metadata = (Map<?, ?>) vs.get("metadata");
+    private VirtualServiceMatch analyzeVirtualService(Map<?, ?> vs, String namespace, String targetHost, String targetPath, int targetPort) {
+        String name = nameOf(vs);
         Map<?, ?> spec = (Map<?, ?>) vs.get("spec");
-        result.put("name", metadata != null ? metadata.get("name") : "?");
-        result.put("hostMatch", false);
-        if (spec == null) return result;
+        if (spec == null) return new VirtualServiceMatch(name, false, null, null, null, null, namespace);
 
-        List<?> vsHosts = (List<?>) spec.get("hosts");
-        if (vsHosts == null) return result;
+        List<?> rawHosts = (List<?>) spec.get("hosts");
+        if (rawHosts == null) return new VirtualServiceMatch(name, false, null, null, null, null, namespace);
 
-        boolean hostMatch = vsHosts.stream().map(Object::toString).anyMatch(h -> hostsMatch(h, targetHost));
-        result.put("hostMatch", hostMatch);
-        result.put("vsHosts", vsHosts);
-        if (!hostMatch) return result;
+        List<String> vsHosts = toStringList(rawHosts);
+        boolean hostMatch = vsHosts.stream().anyMatch(h -> hostsMatch(h, targetHost));
+        if (!hostMatch) return new VirtualServiceMatch(name, false, vsHosts, null, null, null, namespace);
 
         List<?> httpRules = (List<?>) spec.get("http");
         if (httpRules == null || httpRules.isEmpty()) {
-            result.put("noHttpRoutes", true);
-            return result;
+            return new VirtualServiceMatch(name, true, vsHosts, true, null, null, namespace);
         }
 
-        List<Map<String, Object>> routes = new ArrayList<>();
+        List<HttpRouteAnalysis> routes = new ArrayList<>();
         for (Object ruleObj : httpRules) {
             if (!(ruleObj instanceof Map<?, ?> rule)) continue;
             routes.add(analyzeHttpRule(rule, targetPath));
         }
-        result.put("httpRoutes", routes);
-        result.put("pathMatch", routes.stream().anyMatch(r -> Boolean.TRUE.equals(r.get("pathMatch"))));
-        return result;
+        boolean pathMatch = routes.stream().anyMatch(HttpRouteAnalysis::pathMatch);
+        return new VirtualServiceMatch(name, true, vsHosts, null, routes, pathMatch, namespace);
     }
 
-    private Map<String, Object> analyzeHttpRule(Map<?, ?> rule, String targetPath) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        if (rule.get("name") != null) result.put("name", rule.get("name").toString());
-
+    private HttpRouteAnalysis analyzeHttpRule(Map<?, ?> rule, String targetPath) {
         List<?> matches = (List<?>) rule.get("match");
         boolean pathMatch;
         String matchReason;
@@ -502,102 +466,73 @@ public class IstioDiagnosticService {
             matchReason = pathMatch ? "Match: " + found : "Kein URI-Pattern trifft auf '" + targetPath + "'";
         }
 
-        result.put("pathMatch", pathMatch);
-        result.put("matchReason", matchReason);
-
+        List<RouteDestination> dests = null;
         List<?> routeDests = (List<?>) rule.get("route");
         if (routeDests != null) {
-            List<Map<String, Object>> dests = new ArrayList<>();
+            dests = new ArrayList<>();
             for (Object destEntry : routeDests) {
                 if (!(destEntry instanceof Map<?, ?> de)) continue;
                 Map<?, ?> dest = (Map<?, ?>) de.get("destination");
                 if (dest == null) continue;
-                Map<String, Object> d = new LinkedHashMap<>();
-                d.put("host", dest.get("host"));
-                if (dest.get("subset") != null) d.put("subset", dest.get("subset"));
-                if (dest.get("port") != null) d.put("port", dest.get("port"));
-                if (de.get("weight") != null) d.put("weight", de.get("weight"));
-                dests.add(d);
+                Integer weight = de.get("weight") instanceof Number w ? w.intValue() : null;
+                dests.add(new RouteDestination(stringOrNull(dest.get("host")), stringOrNull(dest.get("subset")),
+                        dest.get("port"), weight));
             }
-            result.put("destinations", dests);
         }
-        if (rule.get("timeout") != null) result.put("timeout", rule.get("timeout"));
-        if (rule.get("retries") != null) result.put("retries", rule.get("retries"));
-        if (rule.get("fault") != null) result.put("faultInjection", rule.get("fault"));
-        return result;
+        return new HttpRouteAnalysis(stringOrNull(rule.get("name")), pathMatch, matchReason, dests,
+                stringOrNull(rule.get("timeout")), rule.get("retries"), rule.get("fault"));
     }
 
-    private Map<String, Object> analyzeDestinationRule(Map<?, ?> dr, String targetHost) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        Map<?, ?> metadata = (Map<?, ?>) dr.get("metadata");
+    private DestinationRuleMatch analyzeDestinationRule(Map<?, ?> dr, String namespace, String targetHost) {
+        String name = nameOf(dr);
         Map<?, ?> spec = (Map<?, ?>) dr.get("spec");
-        result.put("name", metadata != null ? metadata.get("name") : "?");
-        result.put("hostMatch", false);
-        if (spec == null) return result;
+        if (spec == null) return new DestinationRuleMatch(name, false, null, null, null, namespace);
 
-        String drHost = spec.get("host") != null ? spec.get("host").toString() : null;
-        if (drHost == null) return result;
+        String drHost = stringOrNull(spec.get("host"));
+        if (drHost == null) return new DestinationRuleMatch(name, false, null, null, null, namespace);
 
-        boolean hostMatch = hostsMatch(drHost, targetHost);
-        result.put("hostMatch", hostMatch);
-        result.put("drHost", drHost);
-        if (!hostMatch) return result;
+        if (!hostsMatch(drHost, targetHost)) return new DestinationRuleMatch(name, false, drHost, null, null, namespace);
 
-        if (spec.get("trafficPolicy") != null) result.put("trafficPolicy", spec.get("trafficPolicy"));
-
+        List<Subset> subsetList = null;
         List<?> subsets = (List<?>) spec.get("subsets");
         if (subsets != null) {
-            List<Map<String, Object>> subsetList = new ArrayList<>();
+            subsetList = new ArrayList<>();
             for (Object s : subsets) {
                 if (!(s instanceof Map<?, ?> sub)) continue;
-                Map<String, Object> entry = new LinkedHashMap<>();
-                entry.put("name", sub.get("name"));
-                entry.put("labels", sub.get("labels"));
-                if (sub.get("trafficPolicy") != null) entry.put("trafficPolicy", sub.get("trafficPolicy"));
-                subsetList.add(entry);
+                subsetList.add(new Subset(stringOrNull(sub.get("name")), sub.get("labels"), sub.get("trafficPolicy")));
             }
-            result.put("subsets", subsetList);
         }
-        return result;
+        return new DestinationRuleMatch(name, true, drHost, spec.get("trafficPolicy"), subsetList, namespace);
     }
 
-    private Map<String, Object> analyzeServiceEntry(Map<?, ?> se, String targetHost, int targetPort) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        Map<?, ?> metadata = (Map<?, ?>) se.get("metadata");
+    private ServiceEntryMatch analyzeServiceEntry(Map<?, ?> se, String namespace, String targetHost, int targetPort) {
+        String name = nameOf(se);
         Map<?, ?> spec = (Map<?, ?>) se.get("spec");
-        result.put("name", metadata != null ? metadata.get("name") : "?");
-        result.put("hostMatch", false);
-        if (spec == null) return result;
+        if (spec == null) return new ServiceEntryMatch(name, false, null, null, null, null, null, null, null, null, namespace);
 
-        List<?> seHosts = (List<?>) spec.get("hosts");
-        if (seHosts == null) return result;
+        List<?> rawHosts = (List<?>) spec.get("hosts");
+        if (rawHosts == null) return new ServiceEntryMatch(name, false, null, null, null, null, null, null, null, null, namespace);
 
-        boolean hostMatch = seHosts.stream().map(Object::toString).anyMatch(h -> hostsMatch(h, targetHost));
-        result.put("hostMatch", hostMatch);
-        result.put("seHosts", seHosts);
-        if (!hostMatch) return result;
-
-        if (spec.get("location") != null)   result.put("location", spec.get("location"));
-        if (spec.get("resolution") != null) result.put("resolution", spec.get("resolution"));
+        List<String> seHosts = toStringList(rawHosts);
+        boolean hostMatch = seHosts.stream().anyMatch(h -> hostsMatch(h, targetHost));
+        if (!hostMatch) return new ServiceEntryMatch(name, false, seHosts, null, null, null, null, null, null, null, namespace);
 
         // Ports prüfen ob der angeforderte Port abgedeckt ist
         List<?> ports = (List<?>) spec.get("ports");
-        if (ports != null) {
-            result.put("ports", ports);
-            if (targetPort > 0) {
-                boolean portMatch = ports.stream()
-                    .filter(p -> p instanceof Map<?, ?>)
-                    .map(p -> (Map<?, ?>) p)
-                    .anyMatch(p -> String.valueOf(targetPort).equals(String.valueOf(p.get("number"))));
-                result.put("portMatch", portMatch);
-                if (!portMatch) result.put("portMatchWarning",
-                    "Port " + targetPort + " ist nicht in den ServiceEntry-Ports definiert.");
-            }
+        Boolean portMatch = null;
+        String portMatchWarning = null;
+        if (ports != null && targetPort > 0) {
+            portMatch = ports.stream()
+                .filter(p -> p instanceof Map<?, ?>)
+                .map(p -> (Map<?, ?>) p)
+                .anyMatch(p -> String.valueOf(targetPort).equals(String.valueOf(p.get("number"))));
+            if (!portMatch) portMatchWarning = "Port " + targetPort + " ist nicht in den ServiceEntry-Ports definiert.";
         }
 
-        if (spec.get("endpoints") != null)        result.put("endpoints", spec.get("endpoints"));
-        if (spec.get("subjectAltNames") != null)  result.put("subjectAltNames", spec.get("subjectAltNames"));
-        return result;
+        return new ServiceEntryMatch(name, true, seHosts,
+                stringOrNull(spec.get("location")), stringOrNull(spec.get("resolution")),
+                ports, portMatch, portMatchWarning,
+                spec.get("endpoints"), spec.get("subjectAltNames"), namespace);
     }
 
     private boolean hostsMatch(String vsHost, String targetHost) {
@@ -640,7 +575,7 @@ public class IstioDiagnosticService {
         return Collections.emptyList();
     }
 
-    private List<Map<String, Object>> diagnoseMetrics(Map<String, String> metrics) {
+    private List<Diagnosis> diagnoseMetrics(Map<String, String> metrics) {
         record Rule(String pattern, String severity, String title, String description, String recommendation) {}
 
         List<Rule> rules = List.of(
@@ -670,7 +605,7 @@ public class IstioDiagnosticService {
                 "Upstream Keep-Alive Konfiguration und Istio idle_timeout prüfen.")
         );
 
-        List<Map<String, Object>> diagnoses = new ArrayList<>();
+        List<Diagnosis> diagnoses = new ArrayList<>();
         for (Rule rule : rules) {
             List<String> matchingKeys = metrics.entrySet().stream()
                 .filter(e -> e.getKey().contains(rule.pattern()))
@@ -679,13 +614,8 @@ public class IstioDiagnosticService {
                 .toList();
 
             if (!matchingKeys.isEmpty()) {
-                Map<String, Object> diagnosis = new LinkedHashMap<>();
-                diagnosis.put("severity", rule.severity());
-                diagnosis.put("title", rule.title());
-                diagnosis.put("description", rule.description());
-                diagnosis.put("recommendation", rule.recommendation());
-                diagnosis.put("affectedMetrics", matchingKeys);
-                diagnoses.add(diagnosis);
+                diagnoses.add(new Diagnosis(rule.severity(), rule.title(), rule.description(),
+                        rule.recommendation(), matchingKeys));
             }
         }
         return diagnoses;

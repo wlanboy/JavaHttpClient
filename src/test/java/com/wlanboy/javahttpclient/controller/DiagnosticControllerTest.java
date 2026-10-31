@@ -2,6 +2,15 @@ package com.wlanboy.javahttpclient.controller;
 
 import com.wlanboy.javahttpclient.client.IstioDiagnosticService;
 import com.wlanboy.javahttpclient.client.TlsInspectorService;
+import com.wlanboy.javahttpclient.client.dto.ErrorResponse;
+import com.wlanboy.javahttpclient.client.dto.K8sContext;
+import com.wlanboy.javahttpclient.client.dto.SidecarReport;
+import com.wlanboy.javahttpclient.client.dto.SidecarReport.HealthDiagnostics;
+import com.wlanboy.javahttpclient.client.dto.SidecarReport.Reachability;
+import com.wlanboy.javahttpclient.client.dto.TlsInspection;
+import com.wlanboy.javahttpclient.client.dto.TlsInspection.CertificateInfo;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.VirtualServiceMatch;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -28,86 +37,73 @@ class DiagnosticControllerTest {
 
     @Test
     void getContext_returnsContextFromService() {
-        Map<String, Object> context = new HashMap<>();
-        context.put("podName", "test-pod-123");
-        context.put("namespace", "default");
-        context.put("istioSidecar", true);
+        K8sContext context = new K8sContext("test-pod-123", "default", true, null);
         when(istioService.getContext()).thenReturn(context);
 
-        ResponseEntity<Map<String, Object>> response = controller.getContext();
+        ResponseEntity<K8sContext> response = controller.getContext();
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
-        assertEquals("test-pod-123", response.getBody().get("podName"));
-        assertEquals("default", response.getBody().get("namespace"));
-        assertEquals(true, response.getBody().get("istioSidecar"));
+        assertEquals("test-pod-123", response.getBody().podName());
+        assertEquals("default", response.getBody().namespace());
+        assertTrue(response.getBody().istioSidecar());
         verify(istioService).getContext();
     }
 
     @Test
     void getContext_withoutIstioSidecar_returnsContextWithoutIstioDetails() {
-        Map<String, Object> context = new HashMap<>();
-        context.put("podName", "test-pod-456");
-        context.put("namespace", "production");
-        context.put("istioSidecar", false);
+        K8sContext context = new K8sContext("test-pod-456", "production", false, null);
         when(istioService.getContext()).thenReturn(context);
 
-        ResponseEntity<Map<String, Object>> response = controller.getContext();
+        ResponseEntity<K8sContext> response = controller.getContext();
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
-        assertEquals(false, response.getBody().get("istioSidecar"));
-        assertNull(response.getBody().get("istioDetails"));
+        assertFalse(response.getBody().istioSidecar());
+        assertNull(response.getBody().istioDetails());
     }
 
     @Test
     void getFullReport_returnsReportFromService() {
-        Map<String, Object> report = new LinkedHashMap<>();
-        Map<String, Object> reachability = new HashMap<>();
-        reachability.put("summary", "10 aktive Upstream-Cluster-Einträge");
-        report.put("reachability", reachability);
-        report.put("timestamp", new Date());
+        SidecarReport report = new SidecarReport(
+                new Reachability(Map.of(), "", "10 aktive Upstream-Cluster-Einträge"),
+                null,
+                "2026-01-01T00:00:00Z",
+                null);
         when(istioService.getFullSidecarDetails()).thenReturn(report);
 
-        ResponseEntity<Map<String, Object>> response = controller.getFullReport();
+        ResponseEntity<SidecarReport> response = controller.getFullReport();
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
-        assertTrue(response.getBody().containsKey("reachability"));
-        assertTrue(response.getBody().containsKey("timestamp"));
+        assertNotNull(response.getBody().reachability());
+        assertNotNull(response.getBody().timestamp());
         verify(istioService).getFullSidecarDetails();
     }
 
     @Test
     void getFullReport_withError_returnsOkWithErrorMessage() {
-        Map<String, Object> report = new HashMap<>();
-        report.put("error", "Istio Sidecar Proxy ist nicht aktiv");
-        when(istioService.getFullSidecarDetails()).thenReturn(report);
+        when(istioService.getFullSidecarDetails())
+                .thenReturn(SidecarReport.error("Istio Sidecar Proxy ist nicht aktiv"));
 
-        ResponseEntity<Map<String, Object>> response = controller.getFullReport();
+        ResponseEntity<SidecarReport> response = controller.getFullReport();
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
-        assertTrue(response.getBody().containsKey("error"));
-        assertEquals("Istio Sidecar Proxy ist nicht aktiv", response.getBody().get("error"));
+        assertEquals("Istio Sidecar Proxy ist nicht aktiv", response.getBody().error());
     }
 
     @Test
     void getFullReport_withHealthDiagnostics_returnsErrorMetrics() {
-        Map<String, Object> report = new LinkedHashMap<>();
-        Map<String, Object> health = new HashMap<>();
-        health.put("activeErrorMetrics", Map.of("cluster.outbound.upstream_rq_5xx", "5"));
-        health.put("errorCount", 1);
-        report.put("healthDiagnostics", health);
-        when(istioService.getFullSidecarDetails()).thenReturn(report);
+        HealthDiagnostics health = new HealthDiagnostics(
+                Map.of("cluster.outbound.upstream_rq_5xx", "5"), 1, List.of());
+        when(istioService.getFullSidecarDetails()).thenReturn(new SidecarReport(null, health, null, null));
 
-        ResponseEntity<Map<String, Object>> response = controller.getFullReport();
+        ResponseEntity<SidecarReport> response = controller.getFullReport();
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> healthResult = (Map<String, Object>) response.getBody().get("healthDiagnostics");
-        assertEquals(1, healthResult.get("errorCount"));
+        assertEquals(1, response.getBody().healthDiagnostics().errorCount());
     }
 
     @Test
@@ -175,10 +171,8 @@ class DiagnosticControllerTest {
         ResponseEntity<?> response = controller.getIstioResources("pods", "default");
 
         assertEquals(400, response.getStatusCode().value());
-        assertNotNull(response.getBody());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> body = (Map<String, Object>) response.getBody();
-        assertTrue(body.get("error").toString().contains("pods"));
+        ErrorResponse body = assertInstanceOf(ErrorResponse.class, response.getBody());
+        assertTrue(body.error().contains("pods"));
     }
 
     @Test
@@ -198,134 +192,101 @@ class DiagnosticControllerTest {
     // correlateUrl tests
     // =========================================================================
 
+    private static UrlCorrelation correlation(String host, String path, List<VirtualServiceMatch> matchedVs, boolean hasMatch) {
+        return new UrlCorrelation(host, path, "default", "default", List.of("default"),
+                matchedVs, List.of(), List.of(), null, List.of(), null, hasMatch, null);
+    }
+
     @Test
-    @SuppressWarnings("unchecked")
     void correlateUrl_withMatchingResources_returnsCorrelationResult() {
-        Map<String, Object> correlationResult = new LinkedHashMap<>();
-        correlationResult.put("hasMatch", true);
-        correlationResult.put("requestedHost", "my-svc");
-        correlationResult.put("requestedPath", "/api");
-        correlationResult.put("matchedVirtualServices",
-                List.of(Map.of("name", "my-vs", "hostMatch", true)));
-        correlationResult.put("matchedDestinationRules", List.of());
-        correlationResult.put("matchedServiceEntries", List.of());
+        VirtualServiceMatch vs = new VirtualServiceMatch("my-vs", true, List.of("my-svc"), null, null, null, "default");
+        when(istioService.correlateUrl("http://my-svc/api", "default"))
+                .thenReturn(correlation("my-svc", "/api", List.of(vs), true));
 
-        when(istioService.correlateUrl("http://my-svc/api", "default")).thenReturn(correlationResult);
-
-        ResponseEntity<Map<String, Object>> response = controller.correlateUrl("http://my-svc/api", "default");
+        ResponseEntity<UrlCorrelation> response = controller.correlateUrl("http://my-svc/api", "default");
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
-        assertEquals(true, response.getBody().get("hasMatch"));
-        List<Object> matchedVs = (List<Object>) response.getBody().get("matchedVirtualServices");
-        assertNotNull(matchedVs);
-        assertEquals(1, matchedVs.size());
+        assertTrue(response.getBody().hasMatch());
+        assertEquals(1, response.getBody().matchedVirtualServices().size());
         verify(istioService).correlateUrl("http://my-svc/api", "default");
     }
 
     @Test
     void correlateUrl_withNoMatch_returnsHasMatchFalse() {
-        Map<String, Object> correlationResult = new LinkedHashMap<>();
-        correlationResult.put("hasMatch", false);
-        correlationResult.put("requestedHost", "unknown-svc");
-        correlationResult.put("requestedPath", "/");
-        correlationResult.put("matchedVirtualServices", List.of());
-        correlationResult.put("matchedDestinationRules", List.of());
-        correlationResult.put("matchedServiceEntries", List.of());
+        when(istioService.correlateUrl("http://unknown-svc/", "default"))
+                .thenReturn(correlation("unknown-svc", "/", List.of(), false));
 
-        when(istioService.correlateUrl("http://unknown-svc/", "default")).thenReturn(correlationResult);
-
-        ResponseEntity<Map<String, Object>> response = controller.correlateUrl("http://unknown-svc/", "default");
+        ResponseEntity<UrlCorrelation> response = controller.correlateUrl("http://unknown-svc/", "default");
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
-        assertEquals(false, response.getBody().get("hasMatch"));
+        assertFalse(response.getBody().hasMatch());
     }
 
     @Test
     void correlateUrl_withError_returnsOkWithError() {
-        Map<String, Object> correlationResult = new HashMap<>();
-        correlationResult.put("error", "Malformed URL");
+        when(istioService.correlateUrl("not-a-url", "default")).thenReturn(UrlCorrelation.error("Malformed URL"));
 
-        when(istioService.correlateUrl("not-a-url", "default")).thenReturn(correlationResult);
-
-        ResponseEntity<Map<String, Object>> response = controller.correlateUrl("not-a-url", "default");
+        ResponseEntity<UrlCorrelation> response = controller.correlateUrl("not-a-url", "default");
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
-        assertTrue(response.getBody().containsKey("error"));
-        assertEquals("Malformed URL", response.getBody().get("error"));
+        assertEquals("Malformed URL", response.getBody().error());
     }
 
     // =========================================================================
     // inspectTls tests
     // =========================================================================
 
+    private static CertificateInfo leafCert(String subject, List<String> sans) {
+        return new CertificateInfo(0, "leaf", subject, "CN=issuer", "01", "2026-01-01 00:00:00",
+                "2027-01-01 00:00:00", 365, false, sans);
+    }
+
     @Test
     void inspectTls_withHttpsUrl_returnsTlsInfo() {
-        Map<String, Object> tlsResult = new LinkedHashMap<>();
-        tlsResult.put("host", "example.com");
-        tlsResult.put("port", 443);
-        tlsResult.put("tlsVersion", "TLSv1.3");
-        tlsResult.put("cipherSuite", "TLS_AES_256_GCM_SHA384");
-        tlsResult.put("isMtls", false);
-        tlsResult.put("chain", List.of(
-                Map.of("index", 0, "type", "leaf", "subject", "CN=example.com")
-        ));
-
+        TlsInspection tlsResult = new TlsInspection("example.com", 443, "TLSv1.3", "TLS_AES_256_GCM_SHA384",
+                false, null, List.of(leafCert("CN=example.com", null)), null);
         when(tlsService.inspect("https://example.com")).thenReturn(tlsResult);
 
-        ResponseEntity<Map<String, Object>> response = controller.inspectTls("https://example.com");
+        ResponseEntity<TlsInspection> response = controller.inspectTls("https://example.com");
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
-        assertEquals("TLSv1.3", response.getBody().get("tlsVersion"));
-        assertEquals("TLS_AES_256_GCM_SHA384", response.getBody().get("cipherSuite"));
-        assertEquals(false, response.getBody().get("isMtls"));
-        assertNotNull(response.getBody().get("chain"));
+        assertEquals("TLSv1.3", response.getBody().tlsVersion());
+        assertEquals("TLS_AES_256_GCM_SHA384", response.getBody().cipherSuite());
+        assertFalse(response.getBody().isMtls());
+        assertNotNull(response.getBody().chain());
         verify(tlsService).inspect("https://example.com");
     }
 
     @Test
     void inspectTls_withHttpUrl_returnsError() {
-        Map<String, Object> tlsResult = new LinkedHashMap<>();
-        tlsResult.put("error", "Kein HTTPS – TLS-Inspektion nicht möglich.");
+        when(tlsService.inspect("http://example.com"))
+                .thenReturn(TlsInspection.error(null, null, "Kein HTTPS – TLS-Inspektion nicht möglich."));
 
-        when(tlsService.inspect("http://example.com")).thenReturn(tlsResult);
-
-        ResponseEntity<Map<String, Object>> response = controller.inspectTls("http://example.com");
+        ResponseEntity<TlsInspection> response = controller.inspectTls("http://example.com");
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
-        assertTrue(response.getBody().containsKey("error"));
-        assertTrue(response.getBody().get("error").toString().contains("Kein HTTPS"));
+        assertTrue(response.getBody().error().contains("Kein HTTPS"));
     }
 
     @Test
     void inspectTls_withMtlsCert_returnsSpiffeId() {
         String spiffeId = "spiffe://cluster.local/ns/default/sa/mysa";
-        Map<String, Object> tlsResult = new LinkedHashMap<>();
-        tlsResult.put("host", "my-svc.default.svc.cluster.local");
-        tlsResult.put("port", 443);
-        tlsResult.put("tlsVersion", "TLSv1.3");
-        tlsResult.put("cipherSuite", "TLS_AES_128_GCM_SHA256");
-        tlsResult.put("isMtls", true);
-        tlsResult.put("spiffeId", spiffeId);
-        tlsResult.put("chain", List.of(
-                Map.of("index", 0, "type", "leaf",
-                        "subject", "O=cluster.local",
-                        "subjectAltNames", List.of("URI:" + spiffeId))
-        ));
+        TlsInspection tlsResult = new TlsInspection("my-svc.default.svc.cluster.local", 443, "TLSv1.3",
+                "TLS_AES_128_GCM_SHA256", true, spiffeId,
+                List.of(leafCert("O=cluster.local", List.of("URI:" + spiffeId))), null);
+        when(tlsService.inspect("https://my-svc.default.svc.cluster.local")).thenReturn(tlsResult);
 
-        when(tlsService.inspect("https://my-svc.default.svc.cluster.local"))
-                .thenReturn(tlsResult);
-
-        ResponseEntity<Map<String, Object>> response =
+        ResponseEntity<TlsInspection> response =
                 controller.inspectTls("https://my-svc.default.svc.cluster.local");
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
-        assertEquals(true, response.getBody().get("isMtls"));
-        assertEquals(spiffeId, response.getBody().get("spiffeId"));
+        assertTrue(response.getBody().isMtls());
+        assertEquals(spiffeId, response.getBody().spiffeId());
     }
 }

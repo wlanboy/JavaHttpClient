@@ -1,5 +1,12 @@
 package com.wlanboy.javahttpclient.client;
 
+import com.wlanboy.javahttpclient.client.dto.K8sContext;
+import com.wlanboy.javahttpclient.client.dto.SidecarReport;
+import com.wlanboy.javahttpclient.client.dto.SidecarReport.Diagnosis;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.HttpRouteAnalysis;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.RouteDestination;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.ServiceEntryMatch;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.VirtualServiceMatch;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -33,48 +40,46 @@ class IstioDiagnosticServiceTest {
 
     @Test
     void getContext_returnsBasicContextInfo() {
-        Map<String, Object> context = service.getContext();
+        K8sContext context = service.getContext();
 
         assertNotNull(context);
-        assertTrue(context.containsKey("podName"));
-        assertTrue(context.containsKey("namespace"));
-        assertTrue(context.containsKey("istioSidecar"));
+        assertNotNull(context.podName());
+        assertNotNull(context.namespace());
     }
 
     @Test
     void getContext_podNameDefaultsToUnknownOrHostname() {
-        Map<String, Object> context = service.getContext();
+        K8sContext context = service.getContext();
 
-        String podName = (String) context.get("podName");
+        String podName = context.podName();
         assertNotNull(podName);
         assertFalse(podName.isEmpty());
     }
 
     @Test
     void getContext_namespaceHasDefaultValue() {
-        Map<String, Object> context = service.getContext();
+        K8sContext context = service.getContext();
 
-        String namespace = (String) context.get("namespace");
+        String namespace = context.namespace();
         assertNotNull(namespace);
         assertFalse(namespace.isEmpty());
     }
 
     @Test
-    void getContext_istioSidecarIsBooleanValue() {
-        Map<String, Object> context = service.getContext();
+    void getContext_withoutSidecar_hasNoIstioDetails() {
+        K8sContext context = service.getContext();
 
-        Object istioSidecar = context.get("istioSidecar");
-        assertNotNull(istioSidecar);
-        assertInstanceOf(Boolean.class, istioSidecar);
+        assertFalse(context.istioSidecar());
+        assertNull(context.istioDetails());
     }
 
     @Test
     void getFullSidecarDetails_withoutIstio_returnsError() {
-        Map<String, Object> report = service.getFullSidecarDetails();
+        SidecarReport report = service.getFullSidecarDetails();
 
         assertNotNull(report);
         // Without Istio sidecar, should return error
-        assertTrue(report.containsKey("error") || report.containsKey("reachability"));
+        assertTrue(report.error() != null || report.reachability() != null);
     }
 
     @Test
@@ -254,18 +259,18 @@ class IstioDiagnosticServiceTest {
     @Test
     void getContext_withReachableStatusPort_detectsSidecar() throws Exception {
         try (ServerSocket statusPort = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
-            Map<String, Object> context = newService(statusPort.getLocalPort()).getContext();
+            K8sContext context = newService(statusPort.getLocalPort()).getContext();
 
-            assertEquals(true, context.get("istioSidecar"));
+            assertTrue(context.istioSidecar());
         }
     }
 
     @Test
     void getFullSidecarDetails_withClosedStatusPort_reportsConfiguredAddress() {
-        Map<String, Object> report = service.getFullSidecarDetails();
+        SidecarReport report = service.getFullSidecarDetails();
 
         assertEquals("Istio Sidecar Proxy ist nicht aktiv (127.0.0.1:" + CLOSED_PORT + " nicht erreichbar).",
-                report.get("error"));
+                report.error());
     }
 
     @Test
@@ -282,8 +287,8 @@ class IstioDiagnosticServiceTest {
             final int index = i;
             threads[i] = new Thread(() -> {
                 try {
-                    Map<String, Object> context = service.getContext();
-                    results[index] = context != null && context.containsKey("podName");
+                    K8sContext context = service.getContext();
+                    results[index] = context != null && context.podName() != null;
                 } catch (Exception e) {
                     results[index] = false;
                 }
@@ -308,73 +313,73 @@ class IstioDiagnosticServiceTest {
     // =========================================================================
 
     @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> invokeDiagnoseMetrics(Map<String, String> metrics) throws Exception {
+    private List<Diagnosis> invokeDiagnoseMetrics(Map<String, String> metrics) throws Exception {
         Method method = IstioDiagnosticService.class.getDeclaredMethod("diagnoseMetrics", Map.class);
         method.setAccessible(true);
-        return (List<Map<String, Object>>) method.invoke(service, metrics);
+        return (List<Diagnosis>) method.invoke(service, metrics);
     }
 
     @Test
     void diagnoseMetrics_withPendingOverflow_returnsCriticalDiagnosis() throws Exception {
         Map<String, String> metrics = Map.of("cluster.foo.upstream_rq_pending_overflow", "3");
 
-        List<Map<String, Object>> diagnoses = invokeDiagnoseMetrics(metrics);
+        List<Diagnosis> diagnoses = invokeDiagnoseMetrics(metrics);
 
         assertEquals(1, diagnoses.size());
-        Map<String, Object> d = diagnoses.get(0);
-        assertEquals("KRITISCH", d.get("severity"));
-        assertTrue(d.get("title").toString().contains("Circuit Breaker"),
-                "Title should mention Circuit Breaker, got: " + d.get("title"));
+        Diagnosis d = diagnoses.get(0);
+        assertEquals("KRITISCH", d.severity());
+        assertTrue(d.title().contains("Circuit Breaker"),
+                "Title should mention Circuit Breaker, got: " + d.title());
     }
 
     @Test
     void diagnoseMetrics_withConnectFail_returnsCriticalDiagnosis() throws Exception {
         Map<String, String> metrics = Map.of("cluster.foo.upstream_cx_connect_fail", "1");
 
-        List<Map<String, Object>> diagnoses = invokeDiagnoseMetrics(metrics);
+        List<Diagnosis> diagnoses = invokeDiagnoseMetrics(metrics);
 
         assertEquals(1, diagnoses.size());
-        assertEquals("KRITISCH", diagnoses.get(0).get("severity"));
+        assertEquals("KRITISCH", diagnoses.get(0).severity());
     }
 
     @Test
     void diagnoseMetrics_withNoneHealthy_returnsCritical() throws Exception {
         Map<String, String> metrics = Map.of("cluster.bar.upstream_cx_none_healthy", "2");
 
-        List<Map<String, Object>> diagnoses = invokeDiagnoseMetrics(metrics);
+        List<Diagnosis> diagnoses = invokeDiagnoseMetrics(metrics);
 
         assertEquals(1, diagnoses.size());
-        assertEquals("KRITISCH", diagnoses.get(0).get("severity"));
+        assertEquals("KRITISCH", diagnoses.get(0).severity());
     }
 
     @Test
     void diagnoseMetrics_withTimeout_returnsWarning() throws Exception {
         Map<String, String> metrics = Map.of("cluster.foo.upstream_rq_timeout", "5");
 
-        List<Map<String, Object>> diagnoses = invokeDiagnoseMetrics(metrics);
+        List<Diagnosis> diagnoses = invokeDiagnoseMetrics(metrics);
 
         assertEquals(1, diagnoses.size());
-        assertEquals("WARNUNG", diagnoses.get(0).get("severity"));
+        assertEquals("WARNUNG", diagnoses.get(0).severity());
     }
 
     @Test
     void diagnoseMetrics_with5xx_returnsWarning() throws Exception {
         Map<String, String> metrics = Map.of("cluster.foo.upstream_rq_5xx", "2");
 
-        List<Map<String, Object>> diagnoses = invokeDiagnoseMetrics(metrics);
+        List<Diagnosis> diagnoses = invokeDiagnoseMetrics(metrics);
 
         assertEquals(1, diagnoses.size());
-        assertEquals("WARNUNG", diagnoses.get(0).get("severity"));
+        assertEquals("WARNUNG", diagnoses.get(0).severity());
     }
 
     @Test
     void diagnoseMetrics_withRetryLimit_returnsInfo() throws Exception {
         Map<String, String> metrics = Map.of("cluster.foo.upstream_rq_retry_limit_exceeded", "1");
 
-        List<Map<String, Object>> diagnoses = invokeDiagnoseMetrics(metrics);
+        List<Diagnosis> diagnoses = invokeDiagnoseMetrics(metrics);
 
         assertEquals(1, diagnoses.size());
-        assertEquals("INFO", diagnoses.get(0).get("severity"));
+        assertEquals("INFO", diagnoses.get(0).severity());
     }
 
     @Test
@@ -384,14 +389,14 @@ class IstioDiagnosticServiceTest {
         metrics.put("cluster.foo.upstream_rq_timeout", "5");
         metrics.put("cluster.foo.upstream_rq_pending_overflow", "1");
 
-        List<Map<String, Object>> diagnoses = invokeDiagnoseMetrics(metrics);
+        List<Diagnosis> diagnoses = invokeDiagnoseMetrics(metrics);
 
         assertEquals(3, diagnoses.size());
     }
 
     @Test
     void diagnoseMetrics_withEmptyMetrics_returnsEmptyList() throws Exception {
-        List<Map<String, Object>> diagnoses = invokeDiagnoseMetrics(Map.of());
+        List<Diagnosis> diagnoses = invokeDiagnoseMetrics(Map.of());
 
         assertNotNull(diagnoses);
         assertTrue(diagnoses.isEmpty());
@@ -407,7 +412,7 @@ class IstioDiagnosticServiceTest {
         metrics.put("cluster.xds-grpc.upstream_rq_5xx", "1");
         metrics.put("cluster.my-app.upstream_rq_5xx", "3");
 
-        List<Map<String, Object>> diagnoses = invokeDiagnoseMetrics(metrics);
+        List<Diagnosis> diagnoses = invokeDiagnoseMetrics(metrics);
 
         // Both keys match the upstream_rq_5xx rule – they collapse into one diagnosis
         // entry (one rule, two affectedMetrics).
@@ -416,17 +421,16 @@ class IstioDiagnosticServiceTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void diagnoseMetrics_affectedMetricsContainsMatchingKeys() throws Exception {
         Map<String, String> metrics = new HashMap<>();
         metrics.put("cluster.svc-a.upstream_rq_timeout", "3");
         metrics.put("cluster.svc-b.upstream_rq_timeout", "7");
 
-        List<Map<String, Object>> diagnoses = invokeDiagnoseMetrics(metrics);
+        List<Diagnosis> diagnoses = invokeDiagnoseMetrics(metrics);
 
         // Exactly one rule matches (upstream_rq_timeout → WARNUNG)
         assertEquals(1, diagnoses.size());
-        List<String> affected = (List<String>) diagnoses.get(0).get("affectedMetrics");
+        List<String> affected = diagnoses.get(0).affectedMetrics();
         assertNotNull(affected);
         assertEquals(2, affected.size());
         assertTrue(affected.contains("cluster.svc-a.upstream_rq_timeout"));
@@ -489,13 +493,12 @@ class IstioDiagnosticServiceTest {
     // analyzeVirtualService tests
     // =========================================================================
 
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> invokeAnalyzeVirtualService(
+    private VirtualServiceMatch invokeAnalyzeVirtualService(
             Map<?, ?> vs, String targetHost, String targetPath, int targetPort) throws Exception {
         Method method = IstioDiagnosticService.class.getDeclaredMethod(
-                "analyzeVirtualService", Map.class, String.class, String.class, int.class);
+                "analyzeVirtualService", Map.class, String.class, String.class, String.class, int.class);
         method.setAccessible(true);
-        return (Map<String, Object>) method.invoke(service, vs, targetHost, targetPath, targetPort);
+        return (VirtualServiceMatch) method.invoke(service, vs, "default", targetHost, targetPath, targetPort);
     }
 
     private Map<String, Object> buildVs(String vsName, List<String> hosts, List<Map<String, Object>> httpRoutes) {
@@ -525,9 +528,9 @@ class IstioDiagnosticServiceTest {
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"),
                 List.of(buildSimplePrefixRoute("/", "my-svc")));
 
-        Map<String, Object> result = invokeAnalyzeVirtualService(vs, "my-svc", "/", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/", -1);
 
-        assertTrue((Boolean) result.get("hostMatch"));
+        assertTrue(result.hostMatch());
     }
 
     @Test
@@ -535,9 +538,9 @@ class IstioDiagnosticServiceTest {
         Map<String, Object> vs = buildVs("my-vs", List.of("other-svc"),
                 List.of(buildSimplePrefixRoute("/", "other-svc")));
 
-        Map<String, Object> result = invokeAnalyzeVirtualService(vs, "my-svc", "/api", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/api", -1);
 
-        assertFalse((Boolean) result.get("hostMatch"));
+        assertFalse(result.hostMatch());
     }
 
     @Test
@@ -545,10 +548,10 @@ class IstioDiagnosticServiceTest {
         Map<String, Object> httpRoute = buildSimplePrefixRoute("/api", "my-svc");
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"), List.of(httpRoute));
 
-        Map<String, Object> result = invokeAnalyzeVirtualService(vs, "my-svc", "/api/v1", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/api/v1", -1);
 
-        assertTrue((Boolean) result.get("hostMatch"));
-        assertTrue((Boolean) result.get("pathMatch"),
+        assertTrue(result.hostMatch());
+        assertTrue(result.pathMatch(),
                 "Prefix /api should match path /api/v1");
     }
 
@@ -564,9 +567,9 @@ class IstioDiagnosticServiceTest {
 
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"), List.of(httpRoute));
 
-        Map<String, Object> result = invokeAnalyzeVirtualService(vs, "my-svc", "/api/v1", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/api/v1", -1);
 
-        assertTrue((Boolean) result.get("pathMatch"), "Exact match /api/v1 should match /api/v1");
+        assertTrue(result.pathMatch(), "Exact match /api/v1 should match /api/v1");
     }
 
     @Test
@@ -581,9 +584,9 @@ class IstioDiagnosticServiceTest {
 
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"), List.of(httpRoute));
 
-        Map<String, Object> result = invokeAnalyzeVirtualService(vs, "my-svc", "/api/v1/items", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/api/v1/items", -1);
 
-        assertFalse((Boolean) result.get("pathMatch"),
+        assertFalse(result.pathMatch(),
                 "Exact match /api/v1 must not match /api/v1/items");
     }
 
@@ -591,15 +594,14 @@ class IstioDiagnosticServiceTest {
     void analyzeVirtualService_withNoHttpRoutes_returnsNoHttpRoutesTrue() throws Exception {
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"), null);
 
-        Map<String, Object> result = invokeAnalyzeVirtualService(vs, "my-svc", "/api", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/api", -1);
 
-        assertTrue((Boolean) result.get("hostMatch"));
-        assertTrue((Boolean) result.get("noHttpRoutes"),
+        assertTrue(result.hostMatch());
+        assertTrue(result.noHttpRoutes(),
                 "noHttpRoutes should be true when spec has no http field");
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void analyzeVirtualService_withRouteHavingDestinations_returnsDestinationInfo() throws Exception {
         Map<String, Object> destination = Map.of(
                 "host", "my-svc",
@@ -612,22 +614,21 @@ class IstioDiagnosticServiceTest {
 
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"), List.of(httpRoute));
 
-        Map<String, Object> result = invokeAnalyzeVirtualService(vs, "my-svc", "/any", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/any", -1);
 
-        assertTrue((Boolean) result.get("hostMatch"));
-        List<Map<String, Object>> httpRoutes = (List<Map<String, Object>>) result.get("httpRoutes");
+        assertTrue(result.hostMatch());
+        List<HttpRouteAnalysis> httpRoutes = result.httpRoutes();
         assertNotNull(httpRoutes);
         assertFalse(httpRoutes.isEmpty());
-        List<Map<String, Object>> dests = (List<Map<String, Object>>) httpRoutes.get(0).get("destinations");
+        List<RouteDestination> dests = httpRoutes.get(0).destinations();
         assertNotNull(dests);
         assertEquals(1, dests.size());
-        assertEquals("my-svc", dests.get(0).get("host"));
-        assertEquals("v2", dests.get(0).get("subset"));
-        assertEquals(80, dests.get(0).get("weight"));
+        assertEquals("my-svc", dests.get(0).host());
+        assertEquals("v2", dests.get(0).subset());
+        assertEquals(80, dests.get(0).weight());
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void analyzeVirtualService_withFaultInjection_returnsFaultInfo() throws Exception {
         Map<String, Object> fault = Map.of(
                 "delay", Map.of("fixedDelay", "2s", "percentage", Map.of("value", 10)));
@@ -639,17 +640,16 @@ class IstioDiagnosticServiceTest {
 
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"), List.of(httpRoute));
 
-        Map<String, Object> result = invokeAnalyzeVirtualService(vs, "my-svc", "/", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/", -1);
 
-        List<Map<String, Object>> httpRoutes = (List<Map<String, Object>>) result.get("httpRoutes");
+        List<HttpRouteAnalysis> httpRoutes = result.httpRoutes();
         assertNotNull(httpRoutes);
-        Map<String, Object> routeResult = httpRoutes.get(0);
-        assertNotNull(routeResult.get("faultInjection"),
+        HttpRouteAnalysis routeResult = httpRoutes.get(0);
+        assertNotNull(routeResult.faultInjection(),
                 "faultInjection should be populated when fault field is present");
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void analyzeVirtualService_withTimeout_returnsTimeoutInfo() throws Exception {
         Map<String, Object> destination = Map.of("host", "my-svc", "port", Map.of("number", 8080));
         Map<String, Object> routeDest = Map.of("destination", destination, "weight", 100);
@@ -659,11 +659,11 @@ class IstioDiagnosticServiceTest {
 
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"), List.of(httpRoute));
 
-        Map<String, Object> result = invokeAnalyzeVirtualService(vs, "my-svc", "/", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/", -1);
 
-        List<Map<String, Object>> httpRoutes = (List<Map<String, Object>>) result.get("httpRoutes");
+        List<HttpRouteAnalysis> httpRoutes = result.httpRoutes();
         assertNotNull(httpRoutes);
-        assertEquals("5s", httpRoutes.get(0).get("timeout"),
+        assertEquals("5s", httpRoutes.get(0).timeout(),
                 "Timeout value should be propagated into route analysis");
     }
 
@@ -678,9 +678,9 @@ class IstioDiagnosticServiceTest {
 
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"), List.of(httpRoute));
 
-        Map<String, Object> result = invokeAnalyzeVirtualService(vs, "my-svc", "/completely/random/path", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/completely/random/path", -1);
 
-        assertTrue((Boolean) result.get("pathMatch"),
+        assertTrue(result.pathMatch(),
                 "Catch-all route (no match field) must match any path");
     }
 
@@ -688,13 +688,12 @@ class IstioDiagnosticServiceTest {
     // analyzeServiceEntry tests
     // =========================================================================
 
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> invokeAnalyzeServiceEntry(
+    private ServiceEntryMatch invokeAnalyzeServiceEntry(
             Map<?, ?> se, String targetHost, int targetPort) throws Exception {
         Method method = IstioDiagnosticService.class.getDeclaredMethod(
-                "analyzeServiceEntry", Map.class, String.class, int.class);
+                "analyzeServiceEntry", Map.class, String.class, String.class, int.class);
         method.setAccessible(true);
-        return (Map<String, Object>) method.invoke(service, se, targetHost, targetPort);
+        return (ServiceEntryMatch) method.invoke(service, se, "default", targetHost, targetPort);
     }
 
     private Map<String, Object> buildServiceEntry(
@@ -714,9 +713,9 @@ class IstioDiagnosticServiceTest {
         Map<String, Object> se = buildServiceEntry("my-se",
                 List.of("external.example.com"), null, null, null);
 
-        Map<String, Object> result = invokeAnalyzeServiceEntry(se, "external.example.com", -1);
+        ServiceEntryMatch result = invokeAnalyzeServiceEntry(se, "external.example.com", -1);
 
-        assertTrue((Boolean) result.get("hostMatch"));
+        assertTrue(result.hostMatch());
     }
 
     @Test
@@ -726,10 +725,10 @@ class IstioDiagnosticServiceTest {
         Map<String, Object> se = buildServiceEntry("my-se",
                 List.of("external.example.com"), ports, "MESH_EXTERNAL", "DNS");
 
-        Map<String, Object> result = invokeAnalyzeServiceEntry(se, "external.example.com", 443);
+        ServiceEntryMatch result = invokeAnalyzeServiceEntry(se, "external.example.com", 443);
 
-        assertTrue((Boolean) result.get("hostMatch"));
-        assertTrue((Boolean) result.get("portMatch"),
+        assertTrue(result.hostMatch());
+        assertTrue(result.portMatch(),
                 "Port 443 is defined in ServiceEntry and should match");
     }
 
@@ -740,12 +739,12 @@ class IstioDiagnosticServiceTest {
         Map<String, Object> se = buildServiceEntry("my-se",
                 List.of("external.example.com"), ports, "MESH_EXTERNAL", "DNS");
 
-        Map<String, Object> result = invokeAnalyzeServiceEntry(se, "external.example.com", 8080);
+        ServiceEntryMatch result = invokeAnalyzeServiceEntry(se, "external.example.com", 8080);
 
-        assertTrue((Boolean) result.get("hostMatch"));
-        assertFalse((Boolean) result.get("portMatch"),
+        assertTrue(result.hostMatch());
+        assertFalse(result.portMatch(),
                 "Port 8080 is not defined in ServiceEntry ports");
-        assertNotNull(result.get("portMatchWarning"),
+        assertNotNull(result.portMatchWarning(),
                 "A portMatchWarning should be present when the requested port is not covered");
     }
 
@@ -756,10 +755,10 @@ class IstioDiagnosticServiceTest {
                 List.of(Map.of("number", 443, "name", "https", "protocol", "HTTPS")),
                 "MESH_EXTERNAL", "DNS");
 
-        Map<String, Object> result = invokeAnalyzeServiceEntry(se, "external.example.com", 443);
+        ServiceEntryMatch result = invokeAnalyzeServiceEntry(se, "external.example.com", 443);
 
-        assertEquals("MESH_EXTERNAL", result.get("location"));
-        assertEquals("DNS", result.get("resolution"));
+        assertEquals("MESH_EXTERNAL", result.location());
+        assertEquals("DNS", result.resolution());
     }
 
     // =========================================================================

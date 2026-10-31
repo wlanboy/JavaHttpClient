@@ -1,5 +1,7 @@
 package com.wlanboy.javahttpclient.client;
 
+import com.wlanboy.javahttpclient.client.dto.TlsInspection;
+import com.wlanboy.javahttpclient.client.dto.TlsInspection.CertificateInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -27,19 +29,17 @@ public class TlsInspectorService {
     private static final int READ_TIMEOUT_MS = 5000;
     private static final DateTimeFormatter ISO = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneOffset.UTC);
 
-    public Map<String, Object> inspect(String url) {
-        Map<String, Object> result = new LinkedHashMap<>();
+    public TlsInspection inspect(String url) {
+        String host = null;
+        Integer port = null;
         try {
             URI uri = URI.create(url);
             if (!"https".equalsIgnoreCase(uri.getScheme())) {
-                result.put("error", "Kein HTTPS – TLS-Inspektion nicht möglich.");
-                return result;
+                return TlsInspection.error(null, null, "Kein HTTPS – TLS-Inspektion nicht möglich.");
             }
 
-            String host = uri.getHost();
-            int port = uri.getPort() != -1 ? uri.getPort() : 443;
-            result.put("host", host);
-            result.put("port", port);
+            host = uri.getHost();
+            port = uri.getPort() != -1 ? uri.getPort() : 443;
 
             AtomicReference<X509Certificate[]> chainRef = new AtomicReference<>();
 
@@ -69,23 +69,23 @@ public class TlsInspectorService {
 
                 SSLSession session = socket.getSession(); // löst Handshake aus
 
-                result.put("tlsVersion", session.getProtocol());
-                result.put("cipherSuite", session.getCipherSuite());
-
+                Boolean isMtls = null;
+                String spiffe = null;
+                List<CertificateInfo> serializedChain = null;
                 X509Certificate[] chain = chainRef.get();
                 if (chain != null && chain.length > 0) {
-                    String spiffe = extractSpiffe(chain[0]);
-                    result.put("isMtls", spiffe != null);
-                    if (spiffe != null) result.put("spiffeId", spiffe);
-                    result.put("chain", serializeChain(chain));
+                    spiffe = extractSpiffe(chain[0]);
+                    isMtls = spiffe != null;
+                    serializedChain = serializeChain(chain);
                 }
+                return new TlsInspection(host, port, session.getProtocol(), session.getCipherSuite(),
+                        isMtls, spiffe, serializedChain, null);
             }
 
         } catch (Exception e) {
             logger.warn("TLS-Inspektion fehlgeschlagen für {}: {}", url, e.getMessage());
-            result.put("error", e.getMessage());
+            return TlsInspection.error(host, port, e.getMessage());
         }
-        return result;
     }
 
     private Socket connect(String host, int port) throws IOException {
@@ -100,27 +100,23 @@ public class TlsInspectorService {
         }
     }
 
-    private List<Map<String, Object>> serializeChain(X509Certificate[] chain) {
-        List<Map<String, Object>> list = new ArrayList<>();
+    private List<CertificateInfo> serializeChain(X509Certificate[] chain) {
+        List<CertificateInfo> list = new ArrayList<>();
         for (int i = 0; i < chain.length; i++) {
             X509Certificate cert = chain[i];
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("index", i);
-            entry.put("type", i == 0 ? "leaf" : (i == chain.length - 1 ? "root" : "intermediate"));
-            entry.put("subject", cert.getSubjectX500Principal().getName());
-            entry.put("issuer", cert.getIssuerX500Principal().getName());
-            entry.put("serial", cert.getSerialNumber().toString(16).toUpperCase());
-            entry.put("validFrom", ISO.format(cert.getNotBefore().toInstant()));
-            entry.put("validTo",   ISO.format(cert.getNotAfter().toInstant()));
-
             long daysLeft = ChronoUnit.DAYS.between(Instant.now(), cert.getNotAfter().toInstant());
-            entry.put("daysUntilExpiry", daysLeft);
-            entry.put("expired", daysLeft < 0);
-
             List<String> sans = extractSans(cert);
-            if (!sans.isEmpty()) entry.put("subjectAltNames", sans);
-
-            list.add(entry);
+            list.add(new CertificateInfo(
+                    i,
+                    i == 0 ? "leaf" : (i == chain.length - 1 ? "root" : "intermediate"),
+                    cert.getSubjectX500Principal().getName(),
+                    cert.getIssuerX500Principal().getName(),
+                    cert.getSerialNumber().toString(16).toUpperCase(),
+                    ISO.format(cert.getNotBefore().toInstant()),
+                    ISO.format(cert.getNotAfter().toInstant()),
+                    daysLeft,
+                    daysLeft < 0,
+                    sans.isEmpty() ? null : sans));
         }
         return list;
     }

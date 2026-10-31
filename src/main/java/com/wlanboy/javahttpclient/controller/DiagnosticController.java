@@ -2,6 +2,13 @@ package com.wlanboy.javahttpclient.controller;
 
 import com.wlanboy.javahttpclient.client.IstioDiagnosticService;
 import com.wlanboy.javahttpclient.client.TlsInspectorService;
+import com.wlanboy.javahttpclient.client.dto.ErrorResponse;
+import com.wlanboy.javahttpclient.client.dto.K8sContext;
+import com.wlanboy.javahttpclient.client.dto.K8sStatus;
+import com.wlanboy.javahttpclient.client.dto.ReachableService;
+import com.wlanboy.javahttpclient.client.dto.SidecarReport;
+import com.wlanboy.javahttpclient.client.dto.TlsInspection;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -14,7 +21,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/k8s")
@@ -41,7 +47,7 @@ public class DiagnosticController {
         @ApiResponse(responseCode = "200", description = "K8s-Kontextdaten erfolgreich abgerufen")
     })
     @GetMapping("/context")
-    public ResponseEntity<Map<String, Object>> getContext() {
+    public ResponseEntity<K8sContext> getContext() {
         return ResponseEntity.ok(istioService.getContext());
     }
 
@@ -56,7 +62,7 @@ public class DiagnosticController {
         @ApiResponse(responseCode = "200", description = "Report generiert (enthält ggf. Fehlerbeschreibung im Body)")
     })
     @GetMapping("/istio/full-report")
-    public ResponseEntity<Map<String, Object>> getFullReport() {
+    public ResponseEntity<SidecarReport> getFullReport() {
         return ResponseEntity.ok(istioService.getFullSidecarDetails());
     }
 
@@ -71,7 +77,7 @@ public class DiagnosticController {
         @ApiResponse(responseCode = "200", description = "K8s-Clientstatus")
     })
     @GetMapping("/status")
-    public ResponseEntity<Map<String, Object>> getK8sStatus() {
+    public ResponseEntity<K8sStatus> getK8sStatus() {
         return ResponseEntity.ok(istioService.getK8sStatus());
     }
 
@@ -85,7 +91,8 @@ public class DiagnosticController {
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Liste der Istio-Ressourcen",
             content = @Content(array = @ArraySchema(schema = @Schema(type = "object")))),
-        @ApiResponse(responseCode = "400", description = "Ungültiger Ressourcentyp", content = @Content)
+        @ApiResponse(responseCode = "400", description = "Ungültiger Ressourcentyp",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     @GetMapping("/istio/{type}")
     public ResponseEntity<?> getIstioResources(
@@ -94,7 +101,7 @@ public class DiagnosticController {
         try {
             return ResponseEntity.ok(istioService.getIstioResources(namespace, type));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
         }
     }
 
@@ -106,7 +113,7 @@ public class DiagnosticController {
         @ApiResponse(responseCode = "200", description = "Korrelationsergebnis erfolgreich abgerufen")
     })
     @GetMapping("/correlate")
-    public ResponseEntity<Map<String, Object>> correlateUrl(
+    public ResponseEntity<UrlCorrelation> correlateUrl(
             @Parameter(description = "Ziel-URL", example = "http://my-service.default.svc.cluster.local/api/v1")
             @RequestParam String url,
             @Parameter(description = "Source-Namespace (Namespace des Aufrufers)", example = "default")
@@ -119,11 +126,10 @@ public class DiagnosticController {
         description = "Parst die Envoy Admin API (/clusters) und liefert alle über den Sidecar erreichbaren Outbound-Services mit Host und Port, z.B. für ein Service-Auswahl-Dropdown."
     )
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Liste der über Envoy erreichbaren Services",
-            content = @Content(array = @ArraySchema(schema = @Schema(type = "object"))))
+        @ApiResponse(responseCode = "200", description = "Liste der über Envoy erreichbaren Services")
     })
     @GetMapping("/services")
-    public ResponseEntity<List<Map<String, Object>>> getReachableServices() {
+    public ResponseEntity<List<ReachableService>> getReachableServices() {
         return ResponseEntity.ok(istioService.getReachableServices());
     }
 
@@ -135,7 +141,7 @@ public class DiagnosticController {
         @ApiResponse(responseCode = "200", description = "TLS-Informationen erfolgreich abgerufen")
     })
     @GetMapping("/tls")
-    public ResponseEntity<Map<String, Object>> inspectTls(
+    public ResponseEntity<TlsInspection> inspectTls(
             @Parameter(description = "Ziel-URL (muss https:// sein)", example = "https://example.com")
             @RequestParam String url) {
         return ResponseEntity.ok(tlsService.inspect(url));
