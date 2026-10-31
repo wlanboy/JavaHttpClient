@@ -185,9 +185,13 @@ Separater `SSLSocket`-basierter TLS-Probe (unabhängig vom Haupt-Request):
 ### Historie (rechte Spalte)
 
 - Bis zu 50 Einträge in `localStorage`
+- Response-Bodies werden pro Eintrag auf 64 KB (65.536 Zeichen) gekürzt; beim Laden steht ein Hinweis am Ende des Bodys
+- Ist der Browser-Speicher trotzdem voll, werden nur die neuesten Einträge gespeichert und ein Hinweis zeigt, wie viele ein Neuladen überstehen
 - Grüner/roter Rand je nach Status
+- Suche nach URL, Filter nach Methode und Status (2xx, 3xx, 4xx, 5xx, Netzwerkfehler)
 - Klick stellt Formular wieder her
 - Export als JSON
+- Import einer exportierten JSON-Datei: Einträge werden mit der vorhandenen Historie zusammengeführt, bereits vorhandene übersprungen, bei mehr als 50 fallen die ältesten weg
 
 ### Istio-Panel (nach Diagnose-Klick)
 

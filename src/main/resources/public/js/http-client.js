@@ -847,6 +847,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     storageWarning = 'Die Historie kann nicht gespeichert werden und geht beim Neuladen verloren.';
                     break;
                 }
+                if (count === 0) storageWarning = 'Browser-Speicher voll: Die Historie geht beim Neuladen verloren.';
             }
         }
         renderHistoryHint();
