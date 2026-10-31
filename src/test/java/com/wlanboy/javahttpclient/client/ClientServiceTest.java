@@ -306,6 +306,46 @@ class ClientServiceTest {
     }
 
     @Test
+    void sendRequest_withCopyHeaders_doesNotDuplicateContentType() {
+        HttpHeaders incomingHeaders = new HttpHeaders();
+        incomingHeaders.add("Content-Type", "application/json");
+
+        JavaHttpRequest request = new JavaHttpRequest(
+                baseUrl() + "/headers",
+                HttpMethod.POST,
+                "{\"key\":\"value\"}",
+                null,
+                true,
+                null
+        );
+
+        ResponseEntity<String> response = clientService.sendRequest(request, incomingHeaders);
+
+        assertEquals(200, response.getStatusCode().value());
+        assertTrue(response.getBody().contains("Content-type=application/json;"));
+    }
+
+    @Test
+    void sendRequest_withCustomContentType_overridesDefault() {
+        HttpHeaders incomingHeaders = new HttpHeaders();
+        incomingHeaders.add("Content-Type", "application/json");
+
+        JavaHttpRequest request = new JavaHttpRequest(
+                baseUrl() + "/headers",
+                HttpMethod.POST,
+                "<root>test</root>",
+                null,
+                true,
+                Map.of("Content-Type", "text/xml")
+        );
+
+        ResponseEntity<String> response = clientService.sendRequest(request, incomingHeaders);
+
+        assertEquals(200, response.getStatusCode().value());
+        assertTrue(response.getBody().contains("Content-type=text/xml;"));
+    }
+
+    @Test
     void sendRequest_filtersBadHeaders() {
         HttpHeaders incomingHeaders = new HttpHeaders();
         incomingHeaders.add("Host", "evil.com");

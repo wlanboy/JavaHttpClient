@@ -225,8 +225,10 @@ public class ClientService {
 							.map(String::toLowerCase)
 							.collect(java.util.stream.Collectors.toSet())
 					: Set.of();
+			// Content-Type des eingehenden Requests beschreibt den JSON-Wrapper an /client, nicht den weitergeleiteten Body
 			incomingHeaders.forEach((key, value) -> {
 				if (!BAD_HEADERS.contains(key.toLowerCase())
+						&& !key.equalsIgnoreCase("content-type")
 						&& !customKeys.contains(key.toLowerCase())
 						&& !value.isEmpty()) {
 					try {
@@ -241,7 +243,8 @@ public class ClientService {
 		if (requestData != null && requestData.customHeaders() != null) {
 			requestData.customHeaders().forEach((key, value) -> {
 				if (key != null && !key.isBlank() && !BAD_HEADERS.contains(key.toLowerCase())) {
-					builder.header(key, value);
+					// setHeader ersetzt z. B. den Default-Content-Type, statt einen zweiten Wert anzuhängen
+					builder.setHeader(key, value);
 				}
 			});
 		}

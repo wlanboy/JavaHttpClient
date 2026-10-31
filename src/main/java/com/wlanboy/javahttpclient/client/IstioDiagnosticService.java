@@ -111,7 +111,7 @@ public class IstioDiagnosticService {
 
             // Sektion B: Gesundheit & Fehler
             String rawStats = restClient.get().uri("/stats").retrieve().body(String.class);
-            Map<String, String> activeErrors = parseStats(rawStats, false);
+            Map<String, String> activeErrors = parseStats(rawStats, true);
             // xds-grpc ist interne Istio Control-Plane – kein App-Traffic, rausfiltern
             activeErrors.entrySet().removeIf(e -> e.getKey().startsWith("cluster.xds-grpc"));
             HealthDiagnostics health = new HealthDiagnostics(activeErrors, activeErrors.size(), diagnoseMetrics(activeErrors));
