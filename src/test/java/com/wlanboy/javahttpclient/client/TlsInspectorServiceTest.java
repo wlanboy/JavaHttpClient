@@ -4,8 +4,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.wlanboy.javahttpclient.client.dto.TlsInspection;
+import com.wlanboy.javahttpclient.client.dto.TlsInspection.CertificateInfo;
+
+import javax.security.auth.x500.X500Principal;
+import java.math.BigInteger;
+import java.security.cert.X509Certificate;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Date;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class TlsInspectorServiceTest {
 
@@ -50,5 +60,35 @@ class TlsInspectorServiceTest {
     @Test
     void inspect_serviceInitialization_doesNotThrow() {
         assertDoesNotThrow(() -> new TlsInspectorService());
+    }
+
+    @Test
+    void serializeChain_certExpiredHoursAgo_isMarkedExpired() {
+        X509Certificate cert = certExpiringAt(Instant.now().minus(Duration.ofHours(10)));
+
+        CertificateInfo info = service.serializeChain(new X509Certificate[]{cert}).getFirst();
+
+        assertEquals(0, info.daysUntilExpiry());
+        assertTrue(info.expired(), "Certificate expired 10 hours ago must be marked expired");
+    }
+
+    @Test
+    void serializeChain_certExpiringInHours_isNotExpired() {
+        X509Certificate cert = certExpiringAt(Instant.now().plus(Duration.ofHours(10)));
+
+        CertificateInfo info = service.serializeChain(new X509Certificate[]{cert}).getFirst();
+
+        assertEquals(0, info.daysUntilExpiry());
+        assertFalse(info.expired(), "Certificate still valid for 10 hours must not be marked expired");
+    }
+
+    private static X509Certificate certExpiringAt(Instant notAfter) {
+        X509Certificate cert = mock(X509Certificate.class);
+        when(cert.getSubjectX500Principal()).thenReturn(new X500Principal("CN=test"));
+        when(cert.getIssuerX500Principal()).thenReturn(new X500Principal("CN=issuer"));
+        when(cert.getSerialNumber()).thenReturn(BigInteger.ONE);
+        when(cert.getNotBefore()).thenReturn(Date.from(notAfter.minus(Duration.ofDays(90))));
+        when(cert.getNotAfter()).thenReturn(Date.from(notAfter));
+        return cert;
     }
 }

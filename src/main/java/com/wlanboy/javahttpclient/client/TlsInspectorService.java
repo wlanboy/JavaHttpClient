@@ -100,11 +100,13 @@ public class TlsInspectorService {
         }
     }
 
-    private List<CertificateInfo> serializeChain(X509Certificate[] chain) {
+    List<CertificateInfo> serializeChain(X509Certificate[] chain) {
         List<CertificateInfo> list = new ArrayList<>();
         for (int i = 0; i < chain.length; i++) {
             X509Certificate cert = chain[i];
-            long daysLeft = ChronoUnit.DAYS.between(Instant.now(), cert.getNotAfter().toInstant());
+            Instant now = Instant.now();
+            Instant notAfter = cert.getNotAfter().toInstant();
+            long daysLeft = ChronoUnit.DAYS.between(now, notAfter);
             List<String> sans = extractSans(cert);
             list.add(new CertificateInfo(
                     i,
@@ -115,7 +117,8 @@ public class TlsInspectorService {
                     ISO.format(cert.getNotBefore().toInstant()),
                     ISO.format(cert.getNotAfter().toInstant()),
                     daysLeft,
-                    daysLeft < 0,
+                    // DAYS.between schneidet ab: seit wenigen Stunden abgelaufen ergäbe daysLeft = 0
+                    notAfter.isBefore(now),
                     sans.isEmpty() ? null : sans));
         }
         return list;
