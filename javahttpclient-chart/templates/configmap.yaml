@@ -11,3 +11,5 @@ data:
     spring.config.import=classpath:META-INF/build-info.properties
     # Tracing
     management.tracing.propagation.type=w3c,b3
+    # Fehler-Responses
+    httpclient.error.include-stacktrace={{ .Values.errors.includeStacktrace }}

@@ -138,7 +138,7 @@ class ClientServiceTest {
 
     @BeforeEach
     void setUp() {
-        clientService = new ClientService();
+        clientService = new ClientService(true);
     }
 
     private String baseUrl() {
@@ -328,6 +328,26 @@ class ClientServiceTest {
         // Error message varies by environment - just check it's an error response
         assertNotNull(response.getBody());
         assertTrue(response.getBody().contains("STACKTRACE"));
+    }
+
+    @Test
+    void sendRequest_withStacktraceDisabled_returns502WithoutStacktrace() {
+        ClientService withoutStacktrace = new ClientService(false);
+        JavaHttpRequest request = new JavaHttpRequest(
+                "http://nonexistent.invalid.host.test/path",
+                HttpMethod.GET,
+                null,
+                null,
+                false,
+                null
+        );
+
+        ResponseEntity<String> response = withoutStacktrace.sendRequest(request, new HttpHeaders());
+
+        assertEquals(502, response.getStatusCode().value());
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody().contains("Details:"));
+        assertFalse(response.getBody().contains("STACKTRACE"));
     }
 
     @Test

@@ -21,6 +21,7 @@ import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -42,8 +43,10 @@ public class ClientService {
 
 	private final HttpClient client;
 	private final HttpClient clientHttp11;
+	private final boolean includeStacktrace;
 
-	public ClientService() {
+	public ClientService(@Value("${httpclient.error.include-stacktrace:true}") boolean includeStacktrace) {
+		this.includeStacktrace = includeStacktrace;
 		client = HttpClient.newBuilder()
 				.version(Version.HTTP_2)
 				.followRedirects(Redirect.NEVER)
@@ -157,14 +160,14 @@ public class ClientService {
 
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
+			logger.error("HTTP Request unterbrochen", e);
 			String errorDetail = formatErrorResponse(e);
-			logger.error("HTTP Request unterbrochen: {}", errorDetail);
 			return ResponseEntity.status(502)
 					.header("Content-Type", "text/plain; charset=UTF-8")
 					.body(errorDetail);
 		} catch (Exception e) {
+			logger.error("HTTP Request fehlgeschlagen", e);
 			String errorDetail = formatErrorResponse(e);
-			logger.error("HTTP Request fehlgeschlagen: {}", errorDetail);
 			return ResponseEntity.status(502)
 					.header("Content-Type", "text/plain; charset=UTF-8")
 					.body(errorDetail);
@@ -293,9 +296,14 @@ public class ClientService {
 			summary = "Ungültige URL: Das Format der Ziel-Adresse ist fehlerhaft.";
 		}
 
+		String message = String.format("%s\nDetails: %s", summary, detail);
+		if (!includeStacktrace) {
+			return message;
+		}
+
 		StringWriter sw = new StringWriter();
 		e.printStackTrace(new PrintWriter(sw));
 
-		return String.format("%s\nDetails: %s\n---STACKTRACE---\n%s", summary, detail, sw.toString());
+		return String.format("%s\n---STACKTRACE---\n%s", message, sw.toString());
 	}
 }

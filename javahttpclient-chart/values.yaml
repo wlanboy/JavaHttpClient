@@ -38,6 +38,10 @@ certManager:
     - javahttpclient.gmk.lan
     - javahttpclient.localhost
 
+errors:
+  # Stacktrace in 502-Responses mitsenden; bei Erreichbarkeit uebers Gateway ggf. abschalten
+  includeStacktrace: true
+
 extraVolumeMounts: []
 extraVolumes: []
 extraEnv: []
