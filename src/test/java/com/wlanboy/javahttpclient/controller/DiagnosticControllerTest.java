@@ -1,6 +1,7 @@
 package com.wlanboy.javahttpclient.controller;
 
 import com.wlanboy.javahttpclient.client.IstioDiagnosticService;
+import com.wlanboy.javahttpclient.client.K8sApiException;
 import com.wlanboy.javahttpclient.client.TlsInspectorService;
 import com.wlanboy.javahttpclient.client.dto.ErrorResponse;
 import com.wlanboy.javahttpclient.client.dto.K8sContext;
@@ -176,6 +177,18 @@ class DiagnosticControllerTest {
     }
 
     @Test
+    void getIstioResources_forbidden_returnsBadGateway() {
+        when(istioService.getIstioResources("demo", "authorizationpolicies"))
+                .thenThrow(new K8sApiException(403, "authorizationpolicies in Namespace 'demo' nicht lesbar: HTTP 403", null));
+
+        ResponseEntity<?> response = controller.getIstioResources("authorizationpolicies", "demo");
+
+        assertEquals(502, response.getStatusCode().value());
+        ErrorResponse body = assertInstanceOf(ErrorResponse.class, response.getBody());
+        assertTrue(body.error().contains("HTTP 403"));
+    }
+
+    @Test
     void getIstioResources_withDifferentNamespaces_callsServiceCorrectly() {
         String[] namespaces = {"default", "kube-system", "istio-system", "production"};
 
@@ -194,7 +207,7 @@ class DiagnosticControllerTest {
 
     private static UrlCorrelation correlation(String host, String path, List<VirtualServiceMatch> matchedVs, boolean hasMatch) {
         return new UrlCorrelation(host, path, "default", "default", List.of("default"),
-                matchedVs, List.of(), List.of(), null, List.of(), null, hasMatch, null);
+                matchedVs, List.of(), List.of(), null, List.of(), null, null, hasMatch, null);
     }
 
     @Test

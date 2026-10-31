@@ -1,6 +1,7 @@
 package com.wlanboy.javahttpclient.controller;
 
 import com.wlanboy.javahttpclient.client.IstioDiagnosticService;
+import com.wlanboy.javahttpclient.client.K8sApiException;
 import com.wlanboy.javahttpclient.client.TlsInspectorService;
 import com.wlanboy.javahttpclient.client.dto.ErrorResponse;
 import com.wlanboy.javahttpclient.client.dto.K8sContext;
@@ -17,6 +18,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -92,6 +94,8 @@ public class DiagnosticController {
         @ApiResponse(responseCode = "200", description = "Liste der Istio-Ressourcen",
             content = @Content(array = @ArraySchema(schema = @Schema(type = "object")))),
         @ApiResponse(responseCode = "400", description = "Ungültiger Ressourcentyp",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "502", description = "K8s API verweigert den Zugriff (z. B. fehlende RBAC-Rechte) oder ist nicht erreichbar",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     @GetMapping("/istio/{type}")
@@ -102,6 +106,8 @@ public class DiagnosticController {
             return ResponseEntity.ok(istioService.getIstioResources(namespace, type));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+        } catch (K8sApiException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(new ErrorResponse(e.getMessage()));
         }
     }
 

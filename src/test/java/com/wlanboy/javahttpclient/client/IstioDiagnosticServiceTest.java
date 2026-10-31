@@ -3,6 +3,7 @@ package com.wlanboy.javahttpclient.client;
 import com.wlanboy.javahttpclient.client.dto.K8sContext;
 import com.wlanboy.javahttpclient.client.dto.SidecarReport;
 import com.wlanboy.javahttpclient.client.dto.SidecarReport.Diagnosis;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation;
 import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.AuthorizationAnalysis;
 import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.HttpRouteAnalysis;
 import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.RouteDestination;
@@ -443,52 +444,76 @@ class IstioDiagnosticServiceTest {
     // hostsMatch tests
     // =========================================================================
 
-    private boolean invokeHostsMatch(String vsHost, String targetHost) throws Exception {
-        Method method = IstioDiagnosticService.class.getDeclaredMethod("hostsMatch", String.class, String.class);
+    private boolean invokeHostsMatch(String resourceHost, String resourceNamespace, String targetFqdn) throws Exception {
+        Method method = IstioDiagnosticService.class.getDeclaredMethod("hostsMatch", String.class, String.class, String.class);
         method.setAccessible(true);
-        return (boolean) method.invoke(service, vsHost, targetHost);
+        return (boolean) method.invoke(service, resourceHost, resourceNamespace, targetFqdn);
+    }
+
+    private String invokeQualifyTargetHost(String host, String sourceNamespace) throws Exception {
+        Method method = IstioDiagnosticService.class.getDeclaredMethod("qualifyTargetHost", String.class, String.class);
+        method.setAccessible(true);
+        return (String) method.invoke(null, host, sourceNamespace);
     }
 
     @Test
     void hostsMatch_exactMatch_returnsTrue() throws Exception {
-        assertTrue(invokeHostsMatch("my-svc", "my-svc"));
+        assertTrue(invokeHostsMatch("my-svc.default.svc.cluster.local", "other", "my-svc.default.svc.cluster.local"));
     }
 
     @Test
     void hostsMatch_wildcard_returnsTrue() throws Exception {
-        assertTrue(invokeHostsMatch("*.default.svc.cluster.local", "my-svc.default.svc.cluster.local"));
+        assertTrue(invokeHostsMatch("*.default.svc.cluster.local", "default", "my-svc.default.svc.cluster.local"));
     }
 
     @Test
     void hostsMatch_wildcardNoMatch_returnsFalse() throws Exception {
-        assertFalse(invokeHostsMatch("*.default.svc.cluster.local", "my-svc.other.svc.cluster.local"));
+        assertFalse(invokeHostsMatch("*.default.svc.cluster.local", "default", "my-svc.other.svc.cluster.local"));
     }
 
     @Test
-    void hostsMatch_shortNameMatchesFqdn_returnsTrue() throws Exception {
-        // short name "my-svc" should match the first segment of the FQDN
-        assertTrue(invokeHostsMatch("my-svc", "my-svc.default.svc.cluster.local"));
+    void hostsMatch_shortNameInResourceNamespace_returnsTrue() throws Exception {
+        assertTrue(invokeHostsMatch("my-svc", "default", "my-svc.default.svc.cluster.local"));
     }
 
     @Test
-    void hostsMatch_prefixMatch_returnsTrue() throws Exception {
-        // "my-svc.default" should match "my-svc.default.svc.cluster.local" via prefix logic
-        assertTrue(invokeHostsMatch("my-svc.default", "my-svc.default.svc.cluster.local"));
+    void hostsMatch_shortNameFromOtherNamespace_returnsFalse() throws Exception {
+        // Kurzname gilt relativ zum Namespace der Resource, nicht zu dem des Ziels
+        assertFalse(invokeHostsMatch("demo", "clients", "demo.demo.svc.cluster.local"));
+    }
+
+    @Test
+    void hostsMatch_shortNameDoesNotMatchExternalHost() throws Exception {
+        assertFalse(invokeHostsMatch("api", "clients", "api.github.com"));
+    }
+
+    @Test
+    void hostsMatch_dottedHostIsNotExpanded() throws Exception {
+        // Istio erweitert nur Hosts ohne Punkt
+        assertFalse(invokeHostsMatch("api.github", "clients", "api.github.com"));
+        assertFalse(invokeHostsMatch("my-svc.default", "default", "my-svc.default.svc.cluster.local"));
     }
 
     @Test
     void hostsMatch_starWildcard_returnsTrue() throws Exception {
-        assertTrue(invokeHostsMatch("*", "anything.com"));
+        assertTrue(invokeHostsMatch("*", "default", "anything.com"));
     }
 
     @Test
     void hostsMatch_noMatch_returnsFalse() throws Exception {
-        assertFalse(invokeHostsMatch("other-svc", "my-svc.default.svc.cluster.local"));
+        assertFalse(invokeHostsMatch("other-svc", "default", "my-svc.default.svc.cluster.local"));
     }
 
     @Test
     void hostsMatch_caseInsensitive_returnsTrue() throws Exception {
-        assertTrue(invokeHostsMatch("My-Svc", "my-svc"));
+        assertTrue(invokeHostsMatch("My-Svc", "Default", "my-svc.default.svc.cluster.local"));
+    }
+
+    @Test
+    void qualifyTargetHost_shortNameResolvesInSourceNamespace() throws Exception {
+        assertEquals("api.clients.svc.cluster.local", invokeQualifyTargetHost("api", "clients"));
+        assertEquals("api.demo.svc.cluster.local", invokeQualifyTargetHost("api.demo.svc", "clients"));
+        assertEquals("api.github.com", invokeQualifyTargetHost("API.github.com", "clients"));
     }
 
     // =========================================================================
@@ -530,7 +555,7 @@ class IstioDiagnosticServiceTest {
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"),
                 List.of(buildSimplePrefixRoute("/", "my-svc")));
 
-        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc.default.svc.cluster.local", "/", -1);
 
         assertTrue(result.hostMatch());
     }
@@ -540,7 +565,7 @@ class IstioDiagnosticServiceTest {
         Map<String, Object> vs = buildVs("my-vs", List.of("other-svc"),
                 List.of(buildSimplePrefixRoute("/", "other-svc")));
 
-        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/api", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc.default.svc.cluster.local", "/api", -1);
 
         assertFalse(result.hostMatch());
     }
@@ -550,7 +575,7 @@ class IstioDiagnosticServiceTest {
         Map<String, Object> httpRoute = buildSimplePrefixRoute("/api", "my-svc");
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"), List.of(httpRoute));
 
-        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/api/v1", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc.default.svc.cluster.local", "/api/v1", -1);
 
         assertTrue(result.hostMatch());
         assertTrue(result.pathMatch(),
@@ -569,7 +594,7 @@ class IstioDiagnosticServiceTest {
 
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"), List.of(httpRoute));
 
-        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/api/v1", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc.default.svc.cluster.local", "/api/v1", -1);
 
         assertTrue(result.pathMatch(), "Exact match /api/v1 should match /api/v1");
     }
@@ -586,7 +611,7 @@ class IstioDiagnosticServiceTest {
 
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"), List.of(httpRoute));
 
-        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/api/v1/items", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc.default.svc.cluster.local", "/api/v1/items", -1);
 
         assertFalse(result.pathMatch(),
                 "Exact match /api/v1 must not match /api/v1/items");
@@ -596,7 +621,7 @@ class IstioDiagnosticServiceTest {
     void analyzeVirtualService_withNoHttpRoutes_returnsNoHttpRoutesTrue() throws Exception {
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"), null);
 
-        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/api", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc.default.svc.cluster.local", "/api", -1);
 
         assertTrue(result.hostMatch());
         assertTrue(result.noHttpRoutes(),
@@ -616,7 +641,7 @@ class IstioDiagnosticServiceTest {
 
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"), List.of(httpRoute));
 
-        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/any", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc.default.svc.cluster.local", "/any", -1);
 
         assertTrue(result.hostMatch());
         List<HttpRouteAnalysis> httpRoutes = result.httpRoutes();
@@ -642,7 +667,7 @@ class IstioDiagnosticServiceTest {
 
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"), List.of(httpRoute));
 
-        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc.default.svc.cluster.local", "/", -1);
 
         List<HttpRouteAnalysis> httpRoutes = result.httpRoutes();
         assertNotNull(httpRoutes);
@@ -661,7 +686,7 @@ class IstioDiagnosticServiceTest {
 
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"), List.of(httpRoute));
 
-        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc.default.svc.cluster.local", "/", -1);
 
         List<HttpRouteAnalysis> httpRoutes = result.httpRoutes();
         assertNotNull(httpRoutes);
@@ -680,7 +705,7 @@ class IstioDiagnosticServiceTest {
 
         Map<String, Object> vs = buildVs("my-vs", List.of("my-svc"), List.of(httpRoute));
 
-        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc", "/completely/random/path", -1);
+        VirtualServiceMatch result = invokeAnalyzeVirtualService(vs, "my-svc.default.svc.cluster.local", "/completely/random/path", -1);
 
         assertTrue(result.pathMatch(),
                 "Catch-all route (no match field) must match any path");
@@ -1028,5 +1053,90 @@ class IstioDiagnosticServiceTest {
                 policy("deny-clients", rulesFromNamespace("DENY", "clients"))));
 
         assertTrue(result.verdict().startsWith("BLOCKED – DENY"), result.verdict());
+    }
+
+    // =========================================================================
+    // correlateUrl: Lesefehler & Host-Matching
+    // =========================================================================
+
+    private static final K8sApiException FORBIDDEN = new K8sApiException(403,
+            "authorizationpolicies in Namespace 'demo' nicht lesbar: HTTP 403", null);
+
+    /** Stub: "forbiddenType" wirft 403, sonst liefert resources je "namespace/type" die Ressourcen. */
+    private UrlCorrelation correlateWithStub(String url, String sourceNamespace, String forbiddenType,
+            Map<String, List<Object>> resources) {
+        IstioDiagnosticService stubbed = new IstioDiagnosticService(K8sClientServiceTest.withoutCluster(),
+                DataSize.ofMegabytes(5), "http://127.0.0.1:15000", CLOSED_PORT) {
+            @Override
+            public List<Object> getIstioResources(String namespace, String type) {
+                if (type.equals(forbiddenType)) throw FORBIDDEN;
+                return resources.getOrDefault(namespace + "/" + type, List.of());
+            }
+        };
+        return stubbed.correlateUrl(url, sourceNamespace);
+    }
+
+    @Test
+    void analyzeAuthorizationPolicies_forbidden_isUnknownNotAllowed() {
+        UrlCorrelation result = correlateWithStub("http://demo-app.demo.svc.cluster.local/", "clients",
+                "authorizationpolicies", Map.of());
+
+        String verdict = result.authorizationPolicies().verdict();
+        assertTrue(verdict.startsWith("UNKNOWN"), verdict);
+        assertTrue(verdict.contains("403"), verdict);
+    }
+
+    @Test
+    void correlateUrl_forbiddenVirtualServices_reportsWarning() {
+        UrlCorrelation result = correlateWithStub("http://demo-app.demo.svc.cluster.local/", "clients",
+                "virtualservices", Map.of());
+
+        assertNull(result.error());
+        assertEquals(List.of(FORBIDDEN.getMessage(), FORBIDDEN.getMessage()), result.warnings());
+        assertFalse(result.hasMatch());
+    }
+
+    @Test
+    void correlateUrl_forbiddenSidecars_reportsWarning() {
+        UrlCorrelation result = correlateWithStub("http://demo-app.demo.svc.cluster.local/", "clients",
+                "sidecars", Map.of());
+
+        assertEquals(List.of(FORBIDDEN.getMessage()), result.warnings());
+        assertFalse(result.sidecarEgress().restricted());
+        assertNotNull(result.sidecarEgress().info());
+    }
+
+    @Test
+    void correlateUrl_allReadable_hasNoWarnings() {
+        UrlCorrelation result = correlateWithStub("http://demo-app.demo.svc.cluster.local/", "clients",
+                null, Map.of());
+
+        assertNull(result.warnings());
+        assertTrue(result.authorizationPolicies().verdict().startsWith("ALLOWED"));
+    }
+
+    @Test
+    void correlateUrl_shortVsHostDoesNotMatchExternalHost() {
+        UrlCorrelation result = correlateWithStub("https://api.github.com/", "clients", null,
+                Map.of("clients/virtualservices", List.of(buildVs("api-vs", List.of("api"), null))));
+
+        assertTrue(result.matchedVirtualServices().isEmpty());
+    }
+
+    @Test
+    void correlateUrl_shortVsHostInSourceDoesNotMatchSameNamedServiceInTarget() {
+        UrlCorrelation result = correlateWithStub("http://demo.demo.svc.cluster.local/", "clients", null, Map.of(
+                "clients/virtualservices", List.of(buildVs("clients-demo", List.of("demo"), null)),
+                "demo/virtualservices", List.of(buildVs("demo-demo", List.of("demo"), null))));
+
+        assertEquals(List.of("demo-demo"), result.matchedVirtualServices().stream().map(VirtualServiceMatch::name).toList());
+    }
+
+    @Test
+    void correlateUrl_shortTargetHostMatchesShortVsHostInSourceNamespace() {
+        UrlCorrelation result = correlateWithStub("http://api/", "clients", null,
+                Map.of("clients/virtualservices", List.of(buildVs("api-vs", List.of("api"), null))));
+
+        assertEquals(1, result.matchedVirtualServices().size());
     }
 }

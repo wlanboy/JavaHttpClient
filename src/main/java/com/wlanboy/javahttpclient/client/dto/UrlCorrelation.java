@@ -19,11 +19,13 @@ public record UrlCorrelation(
         AuthorizationAnalysis authorizationPolicies,
         List<PeerAuthenticationMatch> peerAuthentications,
         SidecarEgress sidecarEgress,
+        @Schema(description = "Ressourcen, die nicht gelesen werden konnten (z. B. fehlende RBAC-Rechte) – das Ergebnis ist dann unvollständig")
+        List<String> warnings,
         Boolean hasMatch,
         String error) {
 
     public static UrlCorrelation error(String error) {
-        return new UrlCorrelation(null, null, null, null, null, null, null, null, null, null, null, null, error);
+        return new UrlCorrelation(null, null, null, null, null, null, null, null, null, null, null, null, null, error);
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)

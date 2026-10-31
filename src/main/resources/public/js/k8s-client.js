@@ -452,7 +452,9 @@ const K8sClient = (() => {
         const hasAny = vsMatches.length > 0 || drMatches.length > 0 || seMatches.length > 0;
         const summaryBadge = hasAny
             ? `<span class="badge badge-success">Match gefunden</span>`
-            : `<span class="badge badge-warning">Kein Match – URL nicht durch Istio-Config abgedeckt</span>`;
+            : corr.warnings?.length
+                ? `<span class="badge badge-warning">Kein Match – Istio-Config nur teilweise lesbar</span>`
+                : `<span class="badge badge-warning">Kein Match – URL nicht durch Istio-Config abgedeckt</span>`;
 
         const subTitle = (text) => `<div class="section-title mb-1 divider">${text}</div>`;
 
@@ -495,6 +497,7 @@ const K8sClient = (() => {
             ${corr.sourceNamespace && corr.targetNamespace ? `
             <div class="x-small muted mb-2">Quelle: <code>${escapeHtml(corr.sourceNamespace)}</code> → Ziel: <code>${escapeHtml(corr.targetNamespace)}</code>
                 (abgefragte Namespaces: ${(corr.queriedNamespaces ?? []).map(n => `<code>${escapeHtml(n)}</code>`).join(', ')})</div>` : ''}
+            ${(corr.warnings ?? []).map(w => `<div class="alert alert-warning x-small mb-2">⚠ Unvollständig: ${escapeHtml(w)}</div>`).join('')}
             ${vsMatches.length > 0 ? `<div class="section-title mb-1">VirtualServices</div>${vsHtml}` : ''}
             ${drMatches.length > 0 ? `${subTitle('DestinationRules')}${drHtml}` : ''}
             ${seMatches.length > 0 ? `${subTitle('ServiceEntries')}${seHtml}` : ''}

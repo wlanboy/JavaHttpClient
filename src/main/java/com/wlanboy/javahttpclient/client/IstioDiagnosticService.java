@@ -203,6 +203,8 @@ public class IstioDiagnosticService {
         }
     }
 
+    private static final String CLUSTER_DOMAIN_SUFFIX = ".svc.cluster.local";
+
     private static final Pattern K8S_FQDN_PATTERN =
             Pattern.compile("^[a-zA-Z0-9-]+\\.([a-zA-Z0-9-]+)\\.svc\\.cluster\\.local$");
 
@@ -223,33 +225,35 @@ public class IstioDiagnosticService {
             String path = (uri.getPath() == null || uri.getPath().isBlank()) ? "/" : uri.getPath();
             int port = uri.getPort();
             String targetNamespace = resolveTargetNamespace(host, sourceNamespace);
+            String targetFqdn = qualifyTargetHost(host, sourceNamespace);
             List<String> namespaces = targetNamespace.equals(sourceNamespace)
                     ? List.of(sourceNamespace)
                     : List.of(sourceNamespace, targetNamespace);
+            List<String> warnings = new ArrayList<>();
 
             List<VirtualServiceMatch> matchedVs = new ArrayList<>();
             for (String ns : namespaces) {
-                for (Object vsObj : getIstioResources(ns, "virtualservices")) {
+                for (Object vsObj : readResources(ns, "virtualservices", warnings)) {
                     if (!(vsObj instanceof Map<?, ?> vs)) continue;
-                    VirtualServiceMatch analysis = analyzeVirtualService(vs, ns, host, path, port);
+                    VirtualServiceMatch analysis = analyzeVirtualService(vs, ns, targetFqdn, path, port);
                     if (analysis.hostMatch()) matchedVs.add(analysis);
                 }
             }
 
             List<DestinationRuleMatch> matchedDrs = new ArrayList<>();
             for (String ns : namespaces) {
-                for (Object drObj : getIstioResources(ns, "destinationrules")) {
+                for (Object drObj : readResources(ns, "destinationrules", warnings)) {
                     if (!(drObj instanceof Map<?, ?> dr)) continue;
-                    DestinationRuleMatch analysis = analyzeDestinationRule(dr, ns, host);
+                    DestinationRuleMatch analysis = analyzeDestinationRule(dr, ns, targetFqdn);
                     if (analysis.hostMatch()) matchedDrs.add(analysis);
                 }
             }
 
             List<ServiceEntryMatch> matchedSes = new ArrayList<>();
             for (String ns : namespaces) {
-                for (Object seObj : getIstioResources(ns, "serviceentries")) {
+                for (Object seObj : readResources(ns, "serviceentries", warnings)) {
                     if (!(seObj instanceof Map<?, ?> se)) continue;
-                    ServiceEntryMatch analysis = analyzeServiceEntry(se, ns, host, port);
+                    ServiceEntryMatch analysis = analyzeServiceEntry(se, ns, targetFqdn, port);
                     if (analysis.hostMatch()) matchedSes.add(analysis);
                 }
             }
@@ -265,12 +269,26 @@ public class IstioDiagnosticService {
                     matchedDrs,
                     matchedSes,
                     analyzeAuthorizationPolicies(targetNamespace, targetShortName, sourceNamespace),
-                    analyzePeerAuthentications(targetNamespace, targetShortName),
-                    analyzeSidecarEgress(sourceNamespace, targetNamespace, host),
+                    analyzePeerAuthentications(targetNamespace, targetShortName, warnings),
+                    analyzeSidecarEgress(sourceNamespace, targetNamespace, targetFqdn, warnings),
+                    warnings.isEmpty() ? null : warnings,
                     !matchedVs.isEmpty() || !matchedDrs.isEmpty() || !matchedSes.isEmpty(),
                     null);
         } catch (Exception e) {
             return UrlCorrelation.error(e.getMessage());
+        }
+    }
+
+    /**
+     * Wie {@link #getIstioResources}, aber ein Lesefehler (z. B. 403) wird als Warnung gesammelt,
+     * damit die restliche Korrelation weiterläuft und "nicht lesbar" sichtbar bleibt.
+     */
+    private List<Object> readResources(String namespace, String type, List<String> warnings) {
+        try {
+            return getIstioResources(namespace, type);
+        } catch (K8sApiException e) {
+            warnings.add(e.getMessage());
+            return List.of();
         }
     }
 
@@ -300,7 +318,15 @@ public class IstioDiagnosticService {
         boolean allowedBySpecificRule = false;
         boolean customAppliesToSource = false;
 
-        for (Object obj : getIstioResources(targetNamespace, "authorizationpolicies")) {
+        List<Object> policies;
+        try {
+            policies = getIstioResources(targetNamespace, "authorizationpolicies");
+        } catch (K8sApiException e) {
+            // Nicht lesbar heißt nicht "keine Policy": ohne Daten keine Aussage über den Zugriff
+            return new AuthorizationAnalysis(matchingPolicies, "UNKNOWN – " + e.getMessage());
+        }
+
+        for (Object obj : policies) {
             if (!(obj instanceof Map<?, ?> ap)) continue;
             Map<?, ?> spec = (Map<?, ?>) ap.get("spec");
             if (spec == null || !selectorMatches(spec, targetShortName)) continue;
@@ -367,9 +393,10 @@ public class IstioDiagnosticService {
         return false;
     }
 
-    private List<PeerAuthenticationMatch> analyzePeerAuthentications(String targetNamespace, String targetShortName) {
+    private List<PeerAuthenticationMatch> analyzePeerAuthentications(String targetNamespace, String targetShortName,
+            List<String> warnings) {
         List<PeerAuthenticationMatch> results = new ArrayList<>();
-        for (Object obj : getIstioResources(targetNamespace, "peerauthentications")) {
+        for (Object obj : readResources(targetNamespace, "peerauthentications", warnings)) {
             if (!(obj instanceof Map<?, ?> pa)) continue;
             Map<?, ?> spec = (Map<?, ?>) pa.get("spec");
             if (spec == null || !selectorMatches(spec, targetShortName)) continue;
@@ -389,8 +416,15 @@ public class IstioDiagnosticService {
      * keine Cluster-Config dafür – der Request scheitert unabhängig von VS/DR/AuthorizationPolicy.
      * Ein Sidecar ohne egress-Abschnitt schränkt nichts ein.
      */
-    private SidecarEgress analyzeSidecarEgress(String sourceNamespace, String targetNamespace, String targetHost) {
-        List<Object> sidecars = getIstioResources(sourceNamespace, "sidecars");
+    private SidecarEgress analyzeSidecarEgress(String sourceNamespace, String targetNamespace, String targetHost,
+            List<String> warnings) {
+        List<Object> sidecars;
+        try {
+            sidecars = getIstioResources(sourceNamespace, "sidecars");
+        } catch (K8sApiException e) {
+            warnings.add(e.getMessage());
+            return new SidecarEgress(false, "Sidecar-Resources nicht lesbar – Egress-Scoping unbekannt.", null, null, null);
+        }
         if (sidecars.isEmpty()) {
             return new SidecarEgress(false, "Kein Sidecar-Resource im Source-Namespace – kein Egress-Scoping aktiv.",
                     null, null, null);
@@ -457,7 +491,7 @@ public class IstioDiagnosticService {
         if (rawHosts == null) return new VirtualServiceMatch(name, false, null, null, null, null, namespace);
 
         List<String> vsHosts = toStringList(rawHosts);
-        boolean hostMatch = vsHosts.stream().anyMatch(h -> hostsMatch(h, targetHost));
+        boolean hostMatch = vsHosts.stream().anyMatch(h -> hostsMatch(h, namespace, targetHost));
         if (!hostMatch) return new VirtualServiceMatch(name, false, vsHosts, null, null, null, namespace);
 
         List<?> httpRules = (List<?>) spec.get("http");
@@ -527,7 +561,7 @@ public class IstioDiagnosticService {
         String drHost = stringOrNull(spec.get("host"));
         if (drHost == null) return new DestinationRuleMatch(name, false, null, null, null, namespace);
 
-        if (!hostsMatch(drHost, targetHost)) return new DestinationRuleMatch(name, false, drHost, null, null, namespace);
+        if (!hostsMatch(drHost, namespace, targetHost)) return new DestinationRuleMatch(name, false, drHost, null, null, namespace);
 
         List<Subset> subsetList = null;
         List<?> subsets = (List<?>) spec.get("subsets");
@@ -550,7 +584,7 @@ public class IstioDiagnosticService {
         if (rawHosts == null) return new ServiceEntryMatch(name, false, null, null, null, null, null, null, null, null, namespace);
 
         List<String> seHosts = toStringList(rawHosts);
-        boolean hostMatch = seHosts.stream().anyMatch(h -> hostsMatch(h, targetHost));
+        boolean hostMatch = seHosts.stream().anyMatch(h -> hostsMatch(h, namespace, targetHost));
         if (!hostMatch) return new ServiceEntryMatch(name, false, seHosts, null, null, null, null, null, null, null, namespace);
 
         // Ports prüfen ob der angeforderte Port abgedeckt ist
@@ -571,16 +605,35 @@ public class IstioDiagnosticService {
                 spec.get("endpoints"), spec.get("subjectAltNames"), namespace);
     }
 
-    private boolean hostsMatch(String vsHost, String targetHost) {
-        vsHost = vsHost.toLowerCase().trim();
-        targetHost = targetHost.toLowerCase().trim();
-        if (vsHost.equals("*") || vsHost.equals(targetHost)) return true;
-        if (vsHost.startsWith("*.")) return targetHost.endsWith(vsHost.substring(1));
-        // Short name matches first segment of FQDN
-        String[] parts = targetHost.split("\\.");
-        if (vsHost.equals(parts[0])) return true;
-        // "my-svc.ns" matches "my-svc.ns.svc.cluster.local"
-        return targetHost.startsWith(vsHost + ".");
+    /**
+     * Löst den Ziel-Host so auf, wie der Client ihn über den DNS-Suchpfad erreicht: Ein Kurzname
+     * ("api") liegt im Source-Namespace, "svc.ns.svc" wird um die Cluster-Domain ergänzt.
+     * Andere Hosts mit Punkt (FQDNs, externe Hosts) bleiben unverändert.
+     */
+    private static String qualifyTargetHost(String host, String sourceNamespace) {
+        if (host == null) return null;
+        String h = host.toLowerCase().trim();
+        if (!h.contains(".")) return h + "." + sourceNamespace.toLowerCase() + CLUSTER_DOMAIN_SUFFIX;
+        if (h.endsWith(".svc")) return h + ".cluster.local";
+        return h;
+    }
+
+    /**
+     * Istio-Semantik: Ein Host ohne Punkt in VS/DR/SE gilt relativ zum Namespace der Resource,
+     * nicht zu dem des Ziels. Hosts mit Punkt werden von Istio nicht erweitert.
+     */
+    private static String qualifyResourceHost(String host, String resourceNamespace) {
+        String h = host.toLowerCase().trim();
+        if (h.equals("*") || h.contains(".")) return h;
+        return h + "." + resourceNamespace.toLowerCase() + CLUSTER_DOMAIN_SUFFIX;
+    }
+
+    /** {@code targetFqdn} muss bereits über {@link #qualifyTargetHost} aufgelöst sein. */
+    private boolean hostsMatch(String resourceHost, String resourceNamespace, String targetFqdn) {
+        if (targetFqdn == null) return false;
+        String h = qualifyResourceHost(resourceHost, resourceNamespace);
+        if (h.equals("*") || h.equals(targetFqdn)) return true;
+        return h.startsWith("*.") && targetFqdn.endsWith(h.substring(1));
     }
 
     public List<Object> getIstioResources(String namespace, String type) {
