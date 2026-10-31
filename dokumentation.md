@@ -81,13 +81,13 @@ Fehlermeldungen (502):
 
 ### `K8sDiagnosticService`
 
-**Envoy Admin API** (Standard: `http://127.0.0.1:15000`, konfigurierbar via `ENVOY_ADMIN_URL`):
+**Envoy Admin API** (Standard: `http://127.0.0.1:15000`, konfigurierbar via `istio.envoy.admin-url` bzw. `ENVOY_ADMIN_URL`):
 
 - `/config_dump` → vollständige Envoy-Konfiguration
 - `/clusters` → aktive Upstream-Cluster
 - `/stats` → **alle** Metriken (kein serverseitiger Filter), nur Werte ≥ 0 (non-zero)
 
-**Istio-Sidecar-Erkennung**: Socket-Test auf `127.0.0.1:15021`
+**Istio-Sidecar-Erkennung**: Socket-Test auf Host der Admin-URL + `istio.sidecar.status-port` (Standard: `127.0.0.1:15021`)
 
 **Unterstützte Istio-Ressourcentypen** (API-Versionen v1 → v1beta1 → v1alpha3 Fallback):
 `virtualservices`, `destinationrules`, `gateways`, `serviceentries`, `sidecars`,
@@ -223,7 +223,8 @@ Separater `SSLSocket`-basierter TLS-Probe (unabhängig vom Haupt-Request):
 
 | Variable | Default | Beschreibung |
 |----------|---------|-------------|
-| `ENVOY_ADMIN_URL` | `http://127.0.0.1:15000` | Envoy Admin API Adresse |
+| `ENVOY_ADMIN_URL` / `istio.envoy.admin-url` | `http://127.0.0.1:15000` | Envoy Admin API Adresse |
+| `istio.sidecar.status-port` | `15021` | Port des pilot-agent Status-Endpoints für die Sidecar-Erkennung (Host aus der Admin-URL) |
 | `KUBERNETES_NAMESPACE` | `default` | Fallback wenn Namespace-Datei nicht lesbar |
 
 Namespace wird primär aus `/var/run/secrets/kubernetes.io/serviceaccount/namespace` gelesen.
