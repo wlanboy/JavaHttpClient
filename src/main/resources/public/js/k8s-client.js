@@ -31,21 +31,16 @@ const K8sClient = (() => {
         const clusterLines = (r.activeEndpoints ?? '').split('\n').filter(l => l.trim());
 
         configDiv.innerHTML = `
-            <div class="d-flex align-items-center justify-content-between mb-2 px-1">
-                <span class="badge bg-secondary"><i class="bi bi-diagram-3 me-1"></i>${escapeHtml(r.summary)}</span>
-                <button class="btn btn-sm btn-outline-secondary x-small" onclick="this.closest('.d-flex').nextElementSibling.classList.toggle('d-none')">
-                    <i class="bi bi-code-slash me-1"></i>Envoy Config (JSON)
-                </button>
+            <div class="spread mb-2">
+                <span class="badge badge-secondary">${escapeHtml(r.summary)}</span>
+                <button type="button" class="btn btn-sm btn-outline" onclick="this.parentElement.nextElementSibling.toggleAttribute('hidden')">Envoy Config (JSON)</button>
             </div>
-            <div class="d-none mb-2">
-                <pre class="x-small p-2" style="background:#1e1e1e;color:#4af626;border-radius:4px;max-height:300px;overflow:auto;">${escapeHtml(JSON.stringify(r.envoyConfig, null, 2))}</pre>
+            <pre class="code-block mb-2" hidden>${escapeHtml(JSON.stringify(r.envoyConfig, null, 2))}</pre>
+            <div class="input-group is-dark x-small">
+                <input type="text" id="clusterSearch" class="input input-sm" placeholder="Cluster filtern..." aria-label="Cluster filtern">
+                <span id="clusterCount" class="input-addon" title="Anzahl Cluster">${clusterLines.length}</span>
             </div>
-            <div class="input-group input-group-sm mb-2">
-                <span class="input-group-text bg-dark border-secondary text-secondary"><i class="bi bi-search"></i></span>
-                <input type="text" id="clusterSearch" class="form-control form-control-sm x-small bg-dark text-success border-secondary" placeholder="Cluster filtern...">
-                <span id="clusterCount" class="input-group-text bg-dark border-secondary text-secondary x-small">${clusterLines.length}</span>
-            </div>
-            <pre id="clusterOutput" class="console x-small p-3 bg-dark text-success" style="border-radius:4px;max-height:400px;overflow:auto;">${escapeHtml(clusterLines.join('\n'))}</pre>`;
+            <pre id="clusterOutput" class="code-block tall p-3">${escapeHtml(clusterLines.join('\n'))}</pre>`;
 
         document.getElementById('clusterSearch').addEventListener('input', function () {
             const term = this.value.toLowerCase();
@@ -69,7 +64,7 @@ const K8sClient = (() => {
     }
 
     function metricValueClass(key, value) {
-        return isProblemMetric(key, value) ? 'fw-bold text-danger' : 'text-body-secondary';
+        return isProblemMetric(key, value) ? 'bold text-danger' : 'muted';
     }
 
     function renderTabB(healthDiagnostics, errorDiv, targetUrl = '') {
@@ -84,16 +79,13 @@ const K8sClient = (() => {
             ? errorEntries.filter(([k]) => k.toLowerCase().includes(targetHostname))
             : [];
         const targetHtml = targetHostname && targetMetrics.length > 0 ? `
-            <div class="alert alert-danger py-2 px-3 mb-2">
-                <div class="d-flex align-items-center mb-1">
-                    <i class="bi bi-crosshair me-2"></i>
-                    <span class="fw-bold small">ZIEL-KORRELATION – ${escapeHtml(targetHostname)}</span>
-                </div>
-                <p class="mb-1 x-small">Envoy-Metriken direkt für das Ziel-Cluster gefunden:</p>
-                <table class="table table-sm x-small mb-0">
+            <div class="alert alert-danger">
+                <div class="alert-title small">⌖ ZIEL-KORRELATION – ${escapeHtml(targetHostname)}</div>
+                <p class="x-small">Envoy-Metriken direkt für das Ziel-Cluster gefunden:</p>
+                <table class="table x-small m-0">
                     <tbody>${targetMetrics.map(([k, v]) => `
                         <tr>
-                            <td class="font-monospace text-truncate" style="max-width:280px;" title="${escapeHtml(k)}">${escapeHtml(k)}</td>
+                            <td class="mono break">${escapeHtml(k)}</td>
                             <td class="${metricValueClass(k, v)}">${escapeHtml(v)}</td>
                         </tr>`).join('')}
                     </tbody>
@@ -101,48 +93,45 @@ const K8sClient = (() => {
             </div>` : '';
 
         const severityConfig = {
-            'KRITISCH': { cls: 'danger',  icon: 'bi-exclamation-octagon-fill' },
-            'WARNUNG':  { cls: 'warning', icon: 'bi-exclamation-triangle-fill' },
-            'INFO':     { cls: 'info',    icon: 'bi-info-circle-fill' },
+            'KRITISCH': { cls: 'danger',  icon: '✖' },
+            'WARNUNG':  { cls: 'warning', icon: '⚠' },
+            'INFO':     { cls: 'info',    icon: 'ℹ' },
         };
 
         const diagnosisHtml = diagnoses.map(d => {
-            const cfg = severityConfig[d.severity] ?? { cls: 'secondary', icon: 'bi-question-circle' };
+            const cfg = severityConfig[d.severity] ?? { cls: 'secondary', icon: '?' };
             const metricsHtml = d.affectedMetrics.map(m =>
-                `<code class="d-block x-small text-truncate" style="max-width:100%;" title="${escapeHtml(m)}">${escapeHtml(m)}</code>`
+                `<code class="block break x-small">${escapeHtml(m)}</code>`
             ).join('');
             return `
-            <div class="alert alert-${cfg.cls} py-2 px-3 mb-2">
-                <div class="d-flex align-items-center mb-1">
-                    <i class="bi ${cfg.icon} me-2"></i>
-                    <span class="fw-bold small">${escapeHtml(d.severity)} – ${escapeHtml(d.title)}</span>
-                </div>
-                <p class="mb-1 x-small">${escapeHtml(d.description)}</p>
-                <p class="mb-1 x-small"><strong>Empfehlung:</strong> ${escapeHtml(d.recommendation)}</p>
+            <div class="alert alert-${cfg.cls}">
+                <div class="alert-title small"><span aria-hidden="true">${cfg.icon}</span>${escapeHtml(d.severity)} – ${escapeHtml(d.title)}</div>
+                <p class="x-small">${escapeHtml(d.description)}</p>
+                <p class="x-small"><strong>Empfehlung:</strong> ${escapeHtml(d.recommendation)}</p>
                 <details class="x-small mt-1">
-                    <summary class="text-muted" style="cursor:pointer;">Betroffene Metriken (${d.affectedMetrics.length})</summary>
+                    <summary>Betroffene Metriken (${d.affectedMetrics.length})</summary>
                     <div class="mt-1">${metricsHtml}</div>
                 </details>
             </div>`;
         }).join('');
 
         const tableHtml = errorEntries.length === 0 ? '' : `
-            <div class="mt-3 mb-1 x-small fw-bold text-uppercase text-muted">Alle aktiven Fehler-Metriken</div>
-            <table class="table table-sm x-small">
+            <div class="section-title mt-2">Alle aktiven Fehler-Metriken</div>
+            <table class="table x-small">
                 <thead><tr><th>Metrik</th><th>Wert</th></tr></thead>
                 <tbody>${errorEntries.map(([k, v]) => `
                     <tr>
-                        <td class="font-monospace text-truncate" style="max-width:300px;" title="${escapeHtml(k)}">${escapeHtml(k)}</td>
+                        <td class="mono break">${escapeHtml(k)}</td>
                         <td class="${metricValueClass(k, v)}">${escapeHtml(v)}</td>
                     </tr>`).join('')}
                 </tbody>
             </table>`;
 
         if (errorEntries.length === 0) {
-            errorDiv.innerHTML = `<div class="alert alert-success small"><i class="bi bi-check-circle me-2"></i>Keine aktiven Fehler-Metriken.</div>`;
+            errorDiv.innerHTML = `<div class="alert alert-success small">✓ Keine aktiven Fehler-Metriken.</div>`;
         } else {
             errorDiv.innerHTML = `
-                <div class="mb-2"><span class="badge bg-secondary">${escapeHtml(errorCount)} Metriken</span></div>
+                <div class="mb-2"><span class="badge badge-secondary">${escapeHtml(errorCount)} Metriken</span></div>
                 ${targetHtml}
                 ${diagnosisHtml}
                 ${tableHtml}`;
@@ -162,15 +151,15 @@ const K8sClient = (() => {
                 .filter(([key]) => key !== 'istioDetails')
                 .map(([key, val]) => {
                     let displayVal = String(val);
-                    let badgeClass = "bg-light text-dark border";
+                    let badgeClass = "badge-light";
                     if (typeof val === 'boolean') {
-                        badgeClass = val ? "bg-success text-white" : "bg-danger text-white";
+                        badgeClass = val ? "badge-success" : "badge-danger";
                         displayVal = val ? "JA" : "NEIN";
                     }
                     return `
                     <tr>
-                        <td class="bg-light fw-bold small text-muted w-25">${escapeHtml(key)}</td>
-                        <td><span class="badge ${badgeClass} font-monospace">${escapeHtml(displayVal)}</span></td>
+                        <td class="key small">${escapeHtml(key)}</td>
+                        <td><span class="badge ${badgeClass} mono">${escapeHtml(displayVal)}</span></td>
                     </tr>`;
                 }).join('');
 
@@ -178,46 +167,44 @@ const K8sClient = (() => {
 
         const statusRows = status ? Object.entries(status).map(([key, val]) => {
             const badgeClass = key === 'initialized'
-                ? (val ? 'bg-success text-white' : 'bg-danger text-white')
-                : 'bg-light text-dark border';
+                ? (val ? 'badge-success' : 'badge-danger')
+                : 'badge-light';
             const cellContent = Array.isArray(val)
-                ? val.map(v => `<span class="badge ${badgeClass} font-monospace me-1 mb-1">${escapeHtml(v)}</span>`).join('')
-                : `<span class="badge ${badgeClass} font-monospace">${escapeHtml(String(val))}</span>`;
+                ? val.map(v => `<span class="badge ${badgeClass} mono mb-1">${escapeHtml(v)}</span>`).join(' ')
+                : `<span class="badge ${badgeClass} mono">${escapeHtml(String(val))}</span>`;
             return `
             <tr>
-                <td class="bg-light fw-bold small text-muted w-25">${escapeHtml(key)}</td>
+                <td class="key small">${escapeHtml(key)}</td>
                 <td>${cellContent}</td>
             </tr>`;
         }).join('') : '';
 
         resourceDiv.innerHTML = `
         <div class="p-2">
-            <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
-                <h6 class="x-small fw-bold text-uppercase text-muted mb-0">Identität & Kontext</h6>
-                <button class="btn btn-sm btn-outline-primary x-small" onclick="this.closest('.d-flex').nextElementSibling.nextElementSibling.classList.toggle('d-none')">
-                    <i class="bi bi-eye me-1"></i> Details (JSON)
-                </button>
+            <div class="spread mb-2">
+                <h6 class="section-title m-0">Identität & Kontext</h6>
+                <button type="button" class="btn btn-sm btn-outline is-primary" onclick="this.parentElement.nextElementSibling.nextElementSibling.toggleAttribute('hidden')">Details (JSON)</button>
             </div>
 
-            <table class="table table-sm border shadow-sm">
+            <table class="table boxed">
                 <tbody>${contextRows}</tbody>
             </table>
 
-            <div class="d-none mt-3">
-                <label class="x-small fw-bold text-muted mb-1">KOMPLETTER KONTEXT (RAW):</label>
-                <pre class="x-small p-3" style="background-color:#1e1e1e;color:#4af626;border-radius:6px;border:1px solid #333;overflow:auto;max-height:500px;font-family:'Fira Code',monospace;">${escapeHtml(JSON.stringify(context, null, 4))}</pre>
+            <div class="mb-3" hidden>
+                <div class="section-title mb-1">Kompletter Kontext (raw)</div>
+                <pre class="code-block tall p-3">${escapeHtml(JSON.stringify(context, null, 4))}</pre>
             </div>
 
             ${istioDetailsHtml}
 
-            <div id="istioResourcesSection" class="border-top pt-3 mt-3">
-                <div class="text-center p-3"><div class="spinner-border spinner-border-sm text-info"></div></div>
+            <div id="istioResourcesSection" class="divider">
+                <div class="loading"><span class="spinner spinner-sm"></span></div>
             </div>
 
             ${statusRows ? `
-            <div class="border-top pt-3 mt-3">
-                <h6 class="x-small fw-bold text-uppercase text-muted mb-2">K8s Client Status</h6>
-                <table class="table table-sm border shadow-sm">
+            <div class="divider">
+                <h6 class="section-title">K8s Client Status</h6>
+                <table class="table boxed">
                     <tbody>${statusRows}</tbody>
                 </table>
             </div>` : ''}
@@ -227,37 +214,33 @@ const K8sClient = (() => {
     function renderIstioSidecarDetails(istioDetails) {
         if (!istioDetails) return '';
         if (istioDetails.error) {
-            return `<div class="alert alert-warning x-small mt-3">${escapeHtml(istioDetails.error)}</div>`;
+            return `<div class="alert alert-warning x-small mt-2">${escapeHtml(istioDetails.error)}</div>`;
         }
         return `
-        <div class="border-top pt-3 mt-3">
-            <h6 class="x-small fw-bold text-uppercase text-muted mb-2">Istio Sidecar Details</h6>
-            <table class="table table-sm x-small border shadow-sm">
+        <div class="divider">
+            <h6 class="section-title">Istio Sidecar Details</h6>
+            <table class="table boxed x-small">
                 <tbody>
                     <tr>
-                        <td class="bg-light fw-bold text-muted w-25">clusterSummary</td>
-                        <td><span class="badge bg-secondary font-monospace">${escapeHtml(istioDetails.clusterSummary ?? '-')}</span></td>
+                        <td class="key">clusterSummary</td>
+                        <td><span class="badge badge-secondary mono">${escapeHtml(istioDetails.clusterSummary ?? '-')}</span></td>
                     </tr>
                 </tbody>
             </table>
             ${istioDetails.networkStats && Object.keys(istioDetails.networkStats).length > 0 ? `
-            <label class="x-small fw-bold text-muted mb-1">Network Stats</label>
-            <table class="table table-sm x-small border">
+            <div class="section-title mb-1">Network Stats</div>
+            <table class="table boxed x-small">
                 <thead><tr><th>Metrik</th><th>Wert</th></tr></thead>
                 <tbody>${Object.entries(istioDetails.networkStats).map(([k, v]) => `
                     <tr>
-                        <td class="font-monospace" title="${escapeHtml(k)}">${escapeHtml(k)}</td>
+                        <td class="mono break">${escapeHtml(k)}</td>
                         <td>${escapeHtml(v)}</td>
                     </tr>`).join('')}
                 </tbody>
             </table>` : ''}
             ${istioDetails.info ? `
-            <button class="btn btn-sm btn-outline-secondary x-small mb-2" onclick="this.nextElementSibling.classList.toggle('d-none')">
-                <i class="bi bi-info-circle me-1"></i>Server Info (JSON)
-            </button>
-            <div class="d-none mb-2">
-                <pre class="x-small p-2" style="background:#1e1e1e;color:#4af626;border-radius:4px;max-height:200px;overflow:auto;">${escapeHtml(JSON.stringify(istioDetails.info, null, 2))}</pre>
-            </div>` : ''}
+            <button type="button" class="btn btn-sm btn-outline mb-2" onclick="this.nextElementSibling.toggleAttribute('hidden')">Server Info (JSON)</button>
+            <pre class="code-block mb-2" style="max-height:200px;" hidden>${escapeHtml(JSON.stringify(istioDetails.info, null, 2))}</pre>` : ''}
         </div>`;
     }
 
@@ -270,15 +253,15 @@ const K8sClient = (() => {
         if (!section) return;
 
         const TYPES = [
-            { key: 'virtualservices',       label: 'VirtualServices',       icon: 'bi-diagram-3' },
-            { key: 'destinationrules',      label: 'DestinationRules',      icon: 'bi-signpost-split' },
-            { key: 'gateways',              label: 'Gateways',              icon: 'bi-door-open' },
-            { key: 'serviceentries',        label: 'ServiceEntries',        icon: 'bi-plug' },
-            { key: 'sidecars',              label: 'SidecarConfigs',        icon: 'bi-box' },
-            { key: 'envoyfilters',          label: 'EnvoyFilters',          icon: 'bi-funnel' },
-            { key: 'peerauthentications',   label: 'PeerAuthentications',   icon: 'bi-key' },
-            { key: 'requestauthentications',label: 'RequestAuthentications',icon: 'bi-person-check' },
-            { key: 'authorizationpolicies', label: 'AuthorizationPolicies', icon: 'bi-shield-lock' },
+            { key: 'virtualservices',       label: 'VirtualServices' },
+            { key: 'destinationrules',      label: 'DestinationRules' },
+            { key: 'gateways',              label: 'Gateways' },
+            { key: 'serviceentries',        label: 'ServiceEntries' },
+            { key: 'sidecars',              label: 'SidecarConfigs' },
+            { key: 'envoyfilters',          label: 'EnvoyFilters' },
+            { key: 'peerauthentications',   label: 'PeerAuthentications' },
+            { key: 'requestauthentications',label: 'RequestAuthentications' },
+            { key: 'authorizationpolicies', label: 'AuthorizationPolicies' },
         ];
 
         // Ziel-Namespace aus "service.namespace.svc.cluster.local" ableiten, sonst = Source-Namespace.
@@ -316,8 +299,8 @@ const K8sClient = (() => {
                 }));
                 const totalCount = itemsByNs.reduce((sum, g) => sum + g.items.length, 0);
                 const countBadge = totalCount === 0
-                    ? `<span class="badge bg-secondary">0</span>`
-                    : `<span class="badge bg-primary">${totalCount}</span>`;
+                    ? `<span class="badge badge-secondary">0</span>`
+                    : `<span class="badge badge-primary">${totalCount}</span>`;
 
                 const isVs = t.key === 'virtualservices';
                 const isDr = t.key === 'destinationrules';
@@ -330,41 +313,35 @@ const K8sClient = (() => {
                         const id = `res-${t.key}-${ns}-${name}`.replace(/[^a-z0-9-]/gi, '-');
                         const key = `${ns}/${name}`;
                         const isMatched = (isVs && matchedVsNames.has(key)) || (isDr && matchedDrNames.has(key)) || (isSe && matchedSeNames.has(key));
-                        const matchBadge = isMatched ? `<span class="badge bg-success ms-1 x-small">URL-Match</span>` : '';
-                        const borderClass = isMatched ? 'border-success border-2' : '';
+                        const matchBadge = isMatched ? `<span class="badge badge-success ms-1">URL-Match</span>` : '';
                         return `
-                        <div class="border rounded mb-1 ${borderClass}">
-                            <button class="btn btn-sm w-100 text-start x-small d-flex justify-content-between align-items-center px-2 py-1"
-                                    onclick="document.getElementById('${id}').classList.toggle('d-none')">
-                                <span class="font-monospace">${escapeHtml(name)}${matchBadge}</span>
-                                <i class="bi bi-chevron-down text-muted"></i>
+                        <div class="item ${isMatched ? 'is-match' : ''}">
+                            <button type="button" class="toggle-row" onclick="document.getElementById('${id}').toggleAttribute('hidden')">
+                                <span class="mono">${escapeHtml(name)}${matchBadge}</span>
+                                <span class="muted" aria-hidden="true">▾</span>
                             </button>
-                            <pre id="${id}" class="${isMatched ? '' : 'd-none'} x-small m-0 p-2" style="background:#1e1e1e;color:#4af626;border-radius:0 0 4px 4px;max-height:300px;overflow:auto;">${escapeHtml(JSON.stringify(item, null, 2))}</pre>
+                            <pre id="${id}" class="code-block" ${isMatched ? '' : 'hidden'}>${escapeHtml(JSON.stringify(item, null, 2))}</pre>
                         </div>`;
                     }).join('');
                     const nsLabel = namespaces.length > 1
-                        ? `<div class="x-small text-muted mb-1 mt-2"><code>${escapeHtml(ns)}</code></div>` : '';
+                        ? `<div class="x-small muted mb-1 mt-2"><code>${escapeHtml(ns)}</code></div>` : '';
                     return nsLabel + itemCards;
                 }).join('');
 
                 return `
                 <div class="mb-3">
-                    <div class="d-flex align-items-center mb-1">
-                        <i class="bi ${t.icon} me-2 text-muted"></i>
-                        <span class="x-small fw-bold text-uppercase text-muted me-2">${t.label}</span>
-                        ${countBadge}
-                    </div>
+                    <div class="section-title mb-1">${t.label} ${countBadge}</div>
                     ${totalCount === 0
-                        ? `<div class="text-muted x-small ps-1">Keine Ressourcen in Namespace${namespaces.length > 1 ? 's' : ''} ${namespaces.map(n => `<code>${escapeHtml(n)}</code>`).join(', ')}</div>`
+                        ? `<div class="muted x-small">Keine Ressourcen in Namespace${namespaces.length > 1 ? 's' : ''} ${namespaces.map(n => `<code>${escapeHtml(n)}</code>`).join(', ')}</div>`
                         : groupsHtml}
                 </div>`;
             }).join('');
 
             section.innerHTML = `
                 ${renderCorrelation(correlation, targetUrl)}
-                <h6 class="x-small fw-bold text-uppercase text-muted mb-3 ${correlation ? 'mt-3 border-top pt-3' : ''}">
-                    <i class="bi bi-list-ul me-1"></i>Istio Ressourcen
-                    ${namespaces.map(n => `<span class="badge bg-light text-dark border ms-1 fw-normal">${escapeHtml(n)}</span>`).join('')}
+                <h6 class="section-title mb-3 ${correlation ? 'divider' : ''}">
+                    Istio Ressourcen
+                    ${namespaces.map(n => `<span class="badge badge-light normal">${escapeHtml(n)}</span>`).join('')}
                 </h6>
                 ${cards}`;
 
@@ -384,36 +361,36 @@ const K8sClient = (() => {
             const routes = vs.httpRoutes ?? [];
             const matchedRoutes = routes.filter(r => r.pathMatch);
             const routeRows = routes.map(r => {
-                const icon = r.pathMatch ? 'bi-check-circle-fill text-success' : 'bi-dash-circle text-muted';
+                const icon = r.pathMatch ? '<span class="text-success">✓</span>' : '<span class="muted">–</span>';
                 const dests = (r.destinations ?? []).map(d =>
-                    `<span class="badge bg-dark font-monospace me-1">${escapeHtml(d.host)}${d.subset ? ':' + escapeHtml(d.subset) : ''}${d.weight != null ? ' ' + escapeHtml(d.weight) + '%' : ''}</span>`
-                ).join('');
+                    `<span class="badge badge-dark mono">${escapeHtml(d.host)}${d.subset ? ':' + escapeHtml(d.subset) : ''}${d.weight != null ? ' ' + escapeHtml(d.weight) + '%' : ''}</span>`
+                ).join(' ');
                 const extras = [
-                    r.timeout ? `<span class="badge bg-secondary ms-1">timeout: ${escapeHtml(r.timeout)}</span>` : '',
-                    r.retries ? `<span class="badge bg-secondary ms-1">retries: ${escapeHtml(JSON.stringify(r.retries))}</span>` : '',
-                    r.faultInjection ? `<span class="badge bg-warning text-dark ms-1">fault injection</span>` : '',
-                ].join('');
+                    r.timeout ? `<span class="badge badge-secondary">timeout: ${escapeHtml(r.timeout)}</span>` : '',
+                    r.retries ? `<span class="badge badge-secondary">retries: ${escapeHtml(JSON.stringify(r.retries))}</span>` : '',
+                    r.faultInjection ? `<span class="badge badge-warning">fault injection</span>` : '',
+                ].join(' ');
                 return `
                 <tr>
-                    <td><i class="bi ${icon}"></i></td>
-                    <td class="x-small text-muted">${escapeHtml(r.name ?? '—')}</td>
-                    <td class="x-small">${escapeHtml(r.matchReason)}</td>
-                    <td>${dests}${extras}</td>
+                    <td>${icon}</td>
+                    <td class="muted">${escapeHtml(r.name ?? '—')}</td>
+                    <td>${escapeHtml(r.matchReason)}</td>
+                    <td>${dests} ${extras}</td>
                 </tr>`;
             }).join('');
 
             const pathBadge = matchedRoutes.length > 0
-                ? `<span class="badge bg-success ms-1">Pfad-Match (${matchedRoutes.length})</span>`
+                ? `<span class="badge badge-success">Pfad-Match (${matchedRoutes.length})</span>`
                 : vs.noHttpRoutes
-                    ? `<span class="badge bg-secondary ms-1">Keine HTTP-Routen</span>`
-                    : `<span class="badge bg-warning text-dark ms-1">Kein Pfad-Match</span>`;
+                    ? `<span class="badge badge-secondary">Keine HTTP-Routen</span>`
+                    : `<span class="badge badge-warning">Kein Pfad-Match</span>`;
 
             return `
             <div class="mb-2">
-                <div class="fw-bold x-small"><i class="bi bi-diagram-3 me-1"></i>${escapeHtml(vs.name)} ${pathBadge}</div>
-                <div class="x-small text-muted mb-1">Hosts: ${escapeHtml((vs.vsHosts ?? []).join(', '))}</div>
+                <div class="bold x-small">${escapeHtml(vs.name)} ${pathBadge}</div>
+                <div class="x-small muted mb-1">Hosts: ${escapeHtml((vs.vsHosts ?? []).join(', '))}</div>
                 ${routes.length > 0 ? `
-                <table class="table table-sm table-borderless mb-0" style="font-size:0.68rem;">
+                <table class="table plain compact m-0">
                     <thead><tr><th></th><th>Route</th><th>Match</th><th>Destinations</th></tr></thead>
                     <tbody>${routeRows}</tbody>
                 </table>` : ''}
@@ -422,17 +399,17 @@ const K8sClient = (() => {
 
         const drHtml = drMatches.map(dr => {
             const subsets = (dr.subsets ?? []).map(s =>
-                `<span class="badge bg-dark font-monospace me-1">${escapeHtml(s.name)}: ${escapeHtml(JSON.stringify(s.labels ?? {}))}</span>`
-            ).join('');
+                `<span class="badge badge-dark mono">${escapeHtml(s.name)}: ${escapeHtml(JSON.stringify(s.labels ?? {}))}</span>`
+            ).join(' ');
             const tp = dr.trafficPolicy;
             const tpItems = tp ? [
-                tp.connectionPool ? `<span class="badge bg-secondary me-1">connectionPool</span>` : '',
-                tp.outlierDetection ? `<span class="badge bg-secondary me-1">outlierDetection</span>` : '',
-                tp.loadBalancer ? `<span class="badge bg-secondary me-1">loadBalancer: ${escapeHtml(tp.loadBalancer.simple)}</span>` : '',
-            ].join('') : '';
+                tp.connectionPool ? `<span class="badge badge-secondary">connectionPool</span>` : '',
+                tp.outlierDetection ? `<span class="badge badge-secondary">outlierDetection</span>` : '',
+                tp.loadBalancer ? `<span class="badge badge-secondary">loadBalancer: ${escapeHtml(tp.loadBalancer.simple)}</span>` : '',
+            ].join(' ').trim() : '';
             return `
             <div class="mb-2">
-                <div class="fw-bold x-small"><i class="bi bi-signpost-split me-1"></i>${escapeHtml(dr.name)}</div>
+                <div class="bold x-small">${escapeHtml(dr.name)}</div>
                 ${tpItems ? `<div class="x-small mb-1">Traffic Policy: ${tpItems}</div>` : ''}
                 ${subsets ? `<div class="x-small">Subsets: ${subsets}</div>` : ''}
             </div>`;
@@ -441,20 +418,20 @@ const K8sClient = (() => {
         const seMatches = corr.matchedServiceEntries ?? [];
         const seHtml = seMatches.map(se => {
             const ports = (se.ports ?? []).map(p =>
-                `<span class="badge bg-dark font-monospace me-1">${escapeHtml(p.number)}/${escapeHtml(p.protocol ?? p.name ?? '?')}</span>`
-            ).join('');
+                `<span class="badge badge-dark mono">${escapeHtml(p.number)}/${escapeHtml(p.protocol ?? p.name ?? '?')}</span>`
+            ).join(' ');
             const portWarning = se.portMatchWarning
-                ? `<div class="x-small text-warning mt-1"><i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(se.portMatchWarning)}</div>` : '';
+                ? `<div class="x-small text-warning mt-1">⚠ ${escapeHtml(se.portMatchWarning)}</div>` : '';
             const portMatchBadge = se.portMatch === false
-                ? `<span class="badge bg-warning text-dark ms-1">Port nicht definiert</span>`
-                : se.portMatch === true ? `<span class="badge bg-success ms-1">Port-Match</span>` : '';
+                ? `<span class="badge badge-warning">Port nicht definiert</span>`
+                : se.portMatch === true ? `<span class="badge badge-success">Port-Match</span>` : '';
             return `
             <div class="mb-2">
-                <div class="fw-bold x-small"><i class="bi bi-plug me-1"></i>${escapeHtml(se.name)} ${portMatchBadge}</div>
-                <div class="x-small text-muted">Hosts: ${escapeHtml((se.seHosts ?? []).join(', '))}</div>
+                <div class="bold x-small">${escapeHtml(se.name)} ${portMatchBadge}</div>
+                <div class="x-small muted">Hosts: ${escapeHtml((se.seHosts ?? []).join(', '))}</div>
                 <div class="x-small">
-                    ${se.location ? `<span class="badge bg-secondary me-1">${escapeHtml(se.location)}</span>` : ''}
-                    ${se.resolution ? `<span class="badge bg-secondary me-1">resolution: ${escapeHtml(se.resolution)}</span>` : ''}
+                    ${se.location ? `<span class="badge badge-secondary">${escapeHtml(se.location)}</span>` : ''}
+                    ${se.resolution ? `<span class="badge badge-secondary">resolution: ${escapeHtml(se.resolution)}</span>` : ''}
                     ${ports}
                 </div>
                 ${portWarning}
@@ -463,51 +440,52 @@ const K8sClient = (() => {
 
         const hasAny = vsMatches.length > 0 || drMatches.length > 0 || seMatches.length > 0;
         const summaryBadge = hasAny
-            ? `<span class="badge bg-success">Match gefunden</span>`
-            : `<span class="badge bg-warning text-dark">Kein Match – URL nicht durch Istio-Config abgedeckt</span>`;
+            ? `<span class="badge badge-success">Match gefunden</span>`
+            : `<span class="badge badge-warning">Kein Match – URL nicht durch Istio-Config abgedeckt</span>`;
+
+        const subTitle = (text) => `<div class="section-title mb-1 divider">${text}</div>`;
 
         const authz = corr.authorizationPolicies;
         const authzBlocked = authz && authz.verdict && authz.verdict.startsWith('BLOCKED');
         const authzHtml = authz ? `
-            <div class="mb-1 x-small fw-bold text-muted border-top pt-2 mt-1">AuthorizationPolicies</div>
+            ${subTitle('AuthorizationPolicies')}
             <div class="mb-2">
-                <span class="badge ${authzBlocked ? 'bg-danger' : 'bg-success'}">${escapeHtml(authz.verdict)}</span>
+                <span class="badge ${authzBlocked ? 'badge-danger' : 'badge-success'}">${escapeHtml(authz.verdict)}</span>
                 ${(authz.matchingPolicies ?? []).map(p => `
-                    <div class="x-small mt-1"><i class="bi bi-shield-lock me-1"></i>${escapeHtml(p.name)}
-                        <span class="badge ${p.action === 'DENY' ? 'bg-danger' : 'bg-secondary'} ms-1">${escapeHtml(p.action)}</span>
-                        ${p.appliesToSource ? `<span class="badge bg-dark ms-1">gilt für Source</span>` : ''}
+                    <div class="x-small mt-1">${escapeHtml(p.name)}
+                        <span class="badge ${p.action === 'DENY' ? 'badge-danger' : 'badge-secondary'} ms-1">${escapeHtml(p.action)}</span>
+                        ${p.appliesToSource ? `<span class="badge badge-dark ms-1">gilt für Source</span>` : ''}
                     </div>`).join('')}
             </div>` : '';
 
         const peerAuth = corr.peerAuthentications ?? [];
         const peerAuthHtml = peerAuth.length > 0 ? `
-            <div class="mb-1 x-small fw-bold text-muted border-top pt-2 mt-1">PeerAuthentications</div>
+            ${subTitle('PeerAuthentications')}
             <div class="mb-2">${peerAuth.map(p => `
-                <span class="badge bg-dark font-monospace me-1">${escapeHtml(p.name)}: mTLS ${escapeHtml(p.mtlsMode)}</span>`).join('')}
+                <span class="badge badge-dark mono">${escapeHtml(p.name)}: mTLS ${escapeHtml(p.mtlsMode)}</span>`).join(' ')}
             </div>` : '';
 
         const sidecarEgress = corr.sidecarEgress;
         const sidecarEgressHtml = (sidecarEgress && sidecarEgress.restricted) ? `
-            <div class="mb-1 x-small fw-bold text-muted border-top pt-2 mt-1">Sidecar Egress-Scope (Source-Namespace)</div>
+            ${subTitle('Sidecar Egress-Scope (Source-Namespace)')}
             <div class="mb-2">
-                <span class="badge ${sidecarEgress.hostAllowed ? 'bg-success' : 'bg-danger'}">${sidecarEgress.hostAllowed ? 'Host im Egress-Scope' : 'Host NICHT im Egress-Scope'}</span>
-                ${sidecarEgress.warning ? `<div class="x-small text-danger mt-1"><i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(sidecarEgress.warning)}</div>` : ''}
+                <span class="badge ${sidecarEgress.hostAllowed ? 'badge-success' : 'badge-danger'}">${sidecarEgress.hostAllowed ? 'Host im Egress-Scope' : 'Host NICHT im Egress-Scope'}</span>
+                ${sidecarEgress.warning ? `<div class="x-small text-danger mt-1">⚠ ${escapeHtml(sidecarEgress.warning)}</div>` : ''}
             </div>` : '';
 
         return `
-        <div class="border rounded p-2 mb-2" style="background:#f8f9fa;">
-            <div class="d-flex align-items-center gap-2 mb-2">
-                <i class="bi bi-link-45deg text-primary"></i>
-                <span class="x-small fw-bold text-uppercase text-muted">URL-Korrelation</span>
+        <div class="panel mb-2">
+            <div class="inline mb-2">
+                <span class="section-title m-0">URL-Korrelation</span>
                 ${summaryBadge}
-                <code class="x-small text-truncate" style="max-width:250px;" title="${escapeHtml(targetUrl)}">${escapeHtml(targetUrl)}</code>
+                <code class="x-small truncate" style="max-width:250px;" title="${escapeHtml(targetUrl)}">${escapeHtml(targetUrl)}</code>
             </div>
             ${corr.sourceNamespace && corr.targetNamespace ? `
-            <div class="x-small text-muted mb-2">Quelle: <code>${escapeHtml(corr.sourceNamespace)}</code> → Ziel: <code>${escapeHtml(corr.targetNamespace)}</code>
+            <div class="x-small muted mb-2">Quelle: <code>${escapeHtml(corr.sourceNamespace)}</code> → Ziel: <code>${escapeHtml(corr.targetNamespace)}</code>
                 (abgefragte Namespaces: ${(corr.queriedNamespaces ?? []).map(n => `<code>${escapeHtml(n)}</code>`).join(', ')})</div>` : ''}
-            ${vsMatches.length > 0 ? `<div class="mb-1 x-small fw-bold text-muted">VirtualServices</div>${vsHtml}` : ''}
-            ${drMatches.length > 0 ? `<div class="mb-1 x-small fw-bold text-muted border-top pt-2 mt-1">DestinationRules</div>${drHtml}` : ''}
-            ${seMatches.length > 0 ? `<div class="mb-1 x-small fw-bold text-muted border-top pt-2 mt-1">ServiceEntries</div>${seHtml}` : ''}
+            ${vsMatches.length > 0 ? `<div class="section-title mb-1">VirtualServices</div>${vsHtml}` : ''}
+            ${drMatches.length > 0 ? `${subTitle('DestinationRules')}${drHtml}` : ''}
+            ${seMatches.length > 0 ? `${subTitle('ServiceEntries')}${seHtml}` : ''}
             ${authzHtml}
             ${peerAuthHtml}
             ${sidecarEgressHtml}
@@ -534,7 +512,7 @@ const K8sClient = (() => {
             const errorDiv  = document.getElementById('errorDisplay');
             const resourceDiv = document.getElementById('resourceDisplay');
 
-            const spinner = '<div class="text-center p-4"><div class="spinner-border text-info"></div></div>';
+            const spinner = '<div class="loading"><span class="spinner"></span></div>';
             [configDiv, errorDiv, resourceDiv].forEach(el => { if (el) el.innerHTML = spinner; });
 
             try {
@@ -546,9 +524,9 @@ const K8sClient = (() => {
                 ]);
 
                 if (report.error) {
-                    const warning = `<div class="alert alert-warning m-3 small"><i class="bi bi-exclamation-triangle me-2"></i>${escapeHtml(report.error)}</div>`;
+                    const warning = `<div class="alert alert-warning small">⚠ ${escapeHtml(report.error)}</div>`;
                     configDiv.innerHTML = warning;
-                    errorDiv.innerHTML  = `<div class="alert alert-warning m-3 small">Keine Daten – Sidecar nicht aktiv.</div>`;
+                    errorDiv.innerHTML  = `<div class="alert alert-warning small">Keine Daten – Sidecar nicht aktiv.</div>`;
                 } else {
                     renderTabA(report.reachability, configDiv);
                     renderTabB(report.healthDiagnostics, errorDiv, targetUrl);
@@ -558,7 +536,7 @@ const K8sClient = (() => {
                 loadIstioResources(context.namespace ?? 'default', targetUrl);
 
             } catch (err) {
-                const msg = `<div class="alert alert-danger m-2 small">Fehler: ${escapeHtml(err.message)}</div>`;
+                const msg = `<div class="alert alert-danger small">Fehler: ${escapeHtml(err.message)}</div>`;
                 [configDiv, errorDiv, resourceDiv].forEach(el => { if (el) el.innerHTML = msg; });
             }
         }
@@ -596,13 +574,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     const diagnoseBtn = document.getElementById('k8sDiagnoseBtn');
     const serviceSelect = document.getElementById('envoyServiceSelect');
     const refreshServicesBtn = document.getElementById('refreshServicesBtn');
+    const diagTabs = document.querySelectorAll('#diagTabs .tab');
+    const closeIstioBtn = document.getElementById('closeIstioBtn');
+
+    // Tab-Umschaltung im Istio-Panel
+    diagTabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            diagTabs.forEach(t => {
+                t.classList.toggle('active', t === tab);
+                t.setAttribute('aria-selected', String(t === tab));
+            });
+            document.querySelectorAll('#istioContent .tab-pane').forEach(pane =>
+                pane.classList.toggle('active', pane.id === tab.dataset.target));
+        });
+    });
+
+    if (closeIstioBtn) {
+        closeIstioBtn.addEventListener('click', () => {
+            document.getElementById('istioPanel').style.display = 'none';
+        });
+    }
 
     const ctx = await K8sClient.loadContext();
     if (contextEl && !ctx.error) {
         contextEl.innerHTML = `
-            <span class="badge bg-dark border me-2"><i class="bi bi-cpu me-1"></i>${escapeHtml(ctx.podName)}</span>
-            <span class="badge bg-dark border me-2"><i class="bi bi-tags me-1"></i>${escapeHtml(ctx.namespace)}</span>
-            <span class="badge ${ctx.istioSidecar ? 'bg-success' : 'bg-warning text-dark'}">Istio: ${ctx.istioSidecar ? 'ON' : 'OFF'}</span>`;
+            <span class="badge badge-dark outlined" title="Pod">pod: ${escapeHtml(ctx.podName)}</span>
+            <span class="badge badge-dark outlined" title="Namespace">ns: ${escapeHtml(ctx.namespace)}</span>
+            <span class="badge ${ctx.istioSidecar ? 'badge-success' : 'badge-warning'}">Istio: ${ctx.istioSidecar ? 'ON' : 'OFF'}</span>`;
     }
 
     refreshEnvoyServiceSelect();
