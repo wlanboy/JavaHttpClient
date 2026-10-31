@@ -13,9 +13,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import org.slf4j.Logger;
@@ -25,6 +23,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.util.unit.DataSize;
+
+import tools.jackson.databind.json.JsonMapper;
 
 import com.wlanboy.javahttpclient.client.LimitedBodyHandler.LimitedBody;
 import com.wlanboy.javahttpclient.controller.JavaHttpRequest;
@@ -42,14 +42,19 @@ public class ClientService {
 	private static final int MAX_REDIRECTS = 10;
 	private static final int MAX_REDIRECT_CHAIN_HEADER_LENGTH = 4096;
 
+	private record RedirectStep(String from, int status, String to, String proto) {}
+
 	private final HttpClient client;
 	private final HttpClient clientHttp11;
 	private final boolean includeStacktrace;
 	private final DataSize maxBodySize;
 	private final LimitedBodyHandler bodyHandler;
+	private final JsonMapper jsonMapper;
 
 	public ClientService(@Value("${httpclient.error.include-stacktrace:true}") boolean includeStacktrace,
-			@Value("${httpclient.response.max-body-size:5MB}") DataSize maxBodySize) {
+			@Value("${httpclient.response.max-body-size:5MB}") DataSize maxBodySize,
+			JsonMapper jsonMapper) {
+		this.jsonMapper = jsonMapper;
 		this.includeStacktrace = includeStacktrace;
 		this.maxBodySize = maxBodySize;
 		this.bodyHandler = new LimitedBodyHandler(Math.toIntExact(maxBodySize.toBytes()));
@@ -67,7 +72,7 @@ public class ClientService {
 
 	public ResponseEntity<String> sendRequest(JavaHttpRequest requestData, HttpHeaders incomingHeaders) {
 		try {
-			List<Map<String, Object>> redirectChain = new ArrayList<>();
+			List<RedirectStep> redirectChain = new ArrayList<>();
 			Set<URI> visitedUris = new HashSet<>();
 			URI currentUri = URI.create(requestData.url());
 			visitedUris.add(currentUri);
@@ -123,12 +128,8 @@ public class ClientService {
 				}
 				visitedUris.add(nextUri);
 
-				Map<String, Object> step = new LinkedHashMap<>();
-				step.put("from", currentUri.toString());
-				step.put("status", response.statusCode());
-				step.put("to", nextUri.toString());
-				step.put("proto", response.version() == Version.HTTP_2 ? "HTTP/2" : "HTTP/1.1");
-				redirectChain.add(step);
+				redirectChain.add(new RedirectStep(currentUri.toString(), response.statusCode(), nextUri.toString(),
+						response.version() == Version.HTTP_2 ? "HTTP/2" : "HTTP/1.1"));
 
 				currentUri = nextUri;
 				// 307/308: Methode + Body beibehalten; alle anderen → GET ohne Body
@@ -162,7 +163,7 @@ public class ClientService {
 						if (resolvedIps != null) h.set("X-Resolved-IP", resolvedIps);
 						if (truncated) h.set("X-Body-Truncated", String.valueOf(maxBodySize.toBytes()));
 						if (!redirectChain.isEmpty()) {
-							String chain = serializeChain(redirectChain);
+							String chain = jsonMapper.writeValueAsString(redirectChain);
 							if (chain.length() > MAX_REDIRECT_CHAIN_HEADER_LENGTH) {
 								chain = chain.substring(0, MAX_REDIRECT_CHAIN_HEADER_LENGTH - 3) + "...";
 							}
@@ -259,40 +260,6 @@ public class ClientService {
 		} catch (Exception e) {
 			return null;
 		}
-	}
-
-	private String serializeChain(List<Map<String, Object>> chain) {
-		StringBuilder sb = new StringBuilder("[");
-		for (int i = 0; i < chain.size(); i++) {
-			if (i > 0) sb.append(",");
-			Map<String, Object> step = chain.get(i);
-			sb.append("{")
-					.append("\"from\":\"").append(escapeJson(step.get("from").toString())).append("\",")
-					.append("\"status\":").append(step.get("status")).append(",")
-					.append("\"to\":\"").append(escapeJson(step.get("to").toString())).append("\",")
-					.append("\"proto\":\"").append(step.get("proto")).append("\"")
-					.append("}");
-		}
-		return sb.append("]").toString();
-	}
-
-	private String escapeJson(String s) {
-		StringBuilder sb = new StringBuilder(s.length() + 16);
-		for (int i = 0; i < s.length(); i++) {
-			char c = s.charAt(i);
-			switch (c) {
-				case '\\' -> sb.append("\\\\");
-				case '"'  -> sb.append("\\\"");
-				case '\n' -> sb.append("\\n");
-				case '\r' -> sb.append("\\r");
-				case '\t' -> sb.append("\\t");
-				default   -> {
-					if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
-					else sb.append(c);
-				}
-			}
-		}
-		return sb.toString();
 	}
 
 	private String formatErrorResponse(Exception e) {

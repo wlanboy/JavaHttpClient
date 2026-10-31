@@ -7,6 +7,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.unit.DataSize;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -23,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ClientServiceTest {
 
+    private static final JsonMapper JSON_MAPPER = JsonMapper.builder().build();
     private static HttpServer server;
     private static int port;
     private ClientService clientService;
@@ -150,7 +152,7 @@ class ClientServiceTest {
 
     @BeforeEach
     void setUp() {
-        clientService = new ClientService(true, DataSize.ofMegabytes(5));
+        clientService = new ClientService(true, DataSize.ofMegabytes(5), JSON_MAPPER);
     }
 
     private String baseUrl() {
@@ -176,7 +178,7 @@ class ClientServiceTest {
 
     @Test
     void sendRequest_withBodyAboveLimit_truncatesAndSetsHeader() {
-        ClientService limited = new ClientService(true, DataSize.ofBytes(1000));
+        ClientService limited = new ClientService(true, DataSize.ofBytes(1000), JSON_MAPPER);
         JavaHttpRequest request = new JavaHttpRequest(
                 baseUrl() + "/large",
                 HttpMethod.GET,
@@ -381,7 +383,7 @@ class ClientServiceTest {
 
     @Test
     void sendRequest_withStacktraceDisabled_returns502WithoutStacktrace() {
-        ClientService withoutStacktrace = new ClientService(false, DataSize.ofMegabytes(5));
+        ClientService withoutStacktrace = new ClientService(false, DataSize.ofMegabytes(5), JSON_MAPPER);
         JavaHttpRequest request = new JavaHttpRequest(
                 "http://nonexistent.invalid.host.test/path",
                 HttpMethod.GET,
