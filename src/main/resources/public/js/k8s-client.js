@@ -228,7 +228,7 @@ const K8sClient = (() => {
                 </tbody>
             </table>
             ${istioDetails.networkStats && Object.keys(istioDetails.networkStats).length > 0 ? `
-            <div class="section-title mb-1">Network Stats</div>
+            <div class="section-title mb-1">Netzwerk-Statistik</div>
             <table class="table boxed x-small">
                 <thead><tr><th>Metrik</th><th>Wert</th></tr></thead>
                 <tbody>${Object.entries(istioDetails.networkStats).map(([k, v]) => `

@@ -26,6 +26,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const clearHistoryBtn = document.getElementById('clearHistoryBtn');
     const exportHistoryBtn = document.getElementById('exportHistoryBtn');
     const urlHistoryList = document.getElementById('urlHistory');
+    const methodSelect = document.getElementById('method');
+    const bodyInput = document.getElementById('body');
+    const bodyHint = document.getElementById('bodyHint');
+    const headerNameSuggestions = document.getElementById('headerNameSuggestions');
+    const headerValueSuggestions = document.getElementById('headerValueSuggestions');
 
     let requestHistory = [];
     let tlsRequestId = 0;
@@ -40,15 +45,40 @@ document.addEventListener('DOMContentLoaded', () => {
     ]);
     // Darüber wird nur formatiert, nicht eingefärbt (tausende <span> machen die Seite träge)
     const MAX_HIGHLIGHT_LENGTH = 1_000_000;
+    // Muss zu BAD_HEADERS in ClientService passen: diese Header verwirft der Proxy
+    const BLOCKED_HEADERS = new Set(['host', 'content-length', 'connection', 'accept-encoding', 'upgrade']);
+    const HEADER_SUGGESTIONS = [
+        'Authorization', 'Content-Type', 'Accept', 'Accept-Language', 'Cookie', 'User-Agent', 'Cache-Control',
+        'x-request-id', 'traceparent', 'b3', 'x-b3-traceid', 'x-b3-spanid', 'x-b3-sampled',
+        'x-forwarded-for', 'x-forwarded-proto', 'x-api-key', 'x-envoy-upstream-rq-timeout-ms'
+    ];
+    // Werte-Vorschläge je Header-Name (klein geschrieben); Funktionen liefern frische Werte
+    const HEADER_VALUE_SUGGESTIONS = {
+        'authorization': ['Bearer ', 'Basic '],
+        'content-type': ['application/json', 'application/x-www-form-urlencoded', 'text/plain', 'application/xml'],
+        'accept': ['application/json', '*/*', 'text/html'],
+        'cache-control': ['no-cache', 'no-store'],
+        'x-request-id': () => [newRequestId()],
+        'x-b3-sampled': ['1', '0'],
+        'x-forwarded-proto': ['https', 'http']
+    };
+    const BODY_HINTS = {
+        GET: { disabled: true, text: 'GET-Requests senden keinen Body. Der Inhalt bleibt hier stehen, wird aber nicht mitgeschickt.' },
+        DELETE: { disabled: false, text: 'Ein Body bei DELETE ist unüblich und wird von vielen Servern ignoriert.' }
+    };
 
     // --- INITIALISIERUNG ---
     loadHistoryFromStorage();
+    headerNameSuggestions.innerHTML = HEADER_SUGGESTIONS.map(name => `<option value="${escapeHtml(name)}"></option>`).join('');
     if (!loadFormFromStorage()) addHeaderRow('Content-Type', 'application/json');
+    updateBodyState();
     wrapToggle.checked = loadWrapSetting();
     applyWrapSetting();
 
     // --- EVENT LISTENER ---
-    addHeaderBtn.addEventListener('click', () => addHeaderRow());
+    addHeaderBtn.addEventListener('click', () => addHeaderRow().querySelector('.h-key').focus());
+
+    methodSelect.addEventListener('change', updateBodyState);
 
     wrapToggle.addEventListener('change', () => {
         applyWrapSetting();
@@ -102,12 +132,13 @@ document.addEventListener('DOMContentLoaded', () => {
     async function performRequest() {
         if (activeRequest) return;
         const startTime = Date.now();
+        const headerRows = collectHeaderRows();
         const payload = {
             url: document.getElementById('url').value,
-            method: document.getElementById('method').value,
-            body: document.getElementById('body').value,
+            method: methodSelect.value,
+            body: bodyInput.value,
             copyHeaders: document.getElementById('copyHeaders').checked,
-            customHeaders: collectHeaders()
+            customHeaders: toHeaderMap(headerRows)
         };
 
         activeRequest = new AbortController();
@@ -135,7 +166,7 @@ document.addEventListener('DOMContentLoaded', () => {
             renderRedirectChain(redirectChainHeader);
             if (payload.url.startsWith('https://')) fetchAndRenderTls(payload.url);
             addToHistory(payload, response.status, duration, data,
-                { protocol, resolvedIp, redirectChain: redirectChainHeader, headers, size, truncatedAt });
+                { protocol, resolvedIp, redirectChain: redirectChainHeader, headers, size, truncatedAt, headerRows });
 
             if (response.status === 502 && data.includes("---STACKTRACE---")) {
                 handleDetailedError(data);
@@ -150,7 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 const errorMsg = "Netzwerkfehler zum Proxy: " + err.message;
                 handleNetworkError(errorMsg);
-                addToHistory(payload, 0, 0, errorMsg);
+                addToHistory(payload, 0, 0, errorMsg, { headerRows });
                 scrollToResult();
             }
         } finally {
@@ -161,29 +192,73 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- HILFSFUNKTIONEN ---
 
-    function addHeaderRow(key = '', value = '') {
+    function addHeaderRow(key = '', value = '', enabled = true) {
         const div = document.createElement('div');
         div.className = 'header-row';
         div.innerHTML = `
-            <input type="text" class="input input-sm h-key" placeholder="Key" value="${escapeHtml(key)}">
-            <input type="text" class="input input-sm h-val" placeholder="Value" value="${escapeHtml(value)}">
-            <button type="button" class="btn btn-sm btn-outline is-danger remove-header" title="Header entfernen">✕</button>
+            <input type="checkbox" class="h-enabled" ${enabled ? 'checked' : ''} title="Header senden (abwählen, um ihn vorübergehend abzuschalten)" aria-label="Header senden">
+            <input type="text" class="input input-sm h-key" placeholder="Name" list="headerNameSuggestions" value="${escapeHtml(key)}" aria-label="Header-Name">
+            <input type="text" class="input input-sm h-val" placeholder="Wert" list="headerValueSuggestions" value="${escapeHtml(value)}" aria-label="Header-Wert">
+            <button type="button" class="btn btn-sm btn-outline is-danger remove-header" title="Header entfernen" aria-label="Header entfernen">✕</button>
         `;
+        const enabledBox = div.querySelector('.h-enabled');
+        const keyInput = div.querySelector('.h-key');
+        const updateRowState = () => {
+            div.classList.toggle('is-off', !enabledBox.checked);
+            const blocked = BLOCKED_HEADERS.has(keyInput.value.trim().toLowerCase());
+            keyInput.classList.toggle('is-blocked', blocked);
+            keyInput.title = blocked ? 'Dieser Header wird vom Proxy nicht weitergeleitet' : '';
+        };
+        enabledBox.addEventListener('change', updateRowState);
+        keyInput.addEventListener('input', updateRowState);
+        // Werte-Vorschläge passend zum Header-Namen dieser Zeile
+        div.querySelector('.h-val').addEventListener('focus', () => {
+            const suggestions = HEADER_VALUE_SUGGESTIONS[keyInput.value.trim().toLowerCase()];
+            const values = typeof suggestions === 'function' ? suggestions() : suggestions ?? [];
+            headerValueSuggestions.innerHTML = values.map(v => `<option value="${escapeHtml(v)}"></option>`).join('');
+        });
         div.querySelector('.remove-header').onclick = () => {
             div.remove();
             saveFormToStorage();
         };
+        updateRowState();
         headerContainer.appendChild(div);
+        return div;
     }
 
-    function collectHeaders() {
+    // Alle Zeilen inkl. abgeschalteter, damit sie gespeichert und wiederhergestellt werden können
+    function collectHeaderRows() {
+        return [...headerContainer.querySelectorAll('.header-row')].map(row => ({
+            key: row.querySelector('.h-key').value.trim(),
+            value: row.querySelector('.h-val').value.trim(),
+            enabled: row.querySelector('.h-enabled').checked
+        })).filter(row => row.key || row.value);
+    }
+
+    // Nur aktive Header gehen an den Proxy
+    function toHeaderMap(rows) {
         const headers = {};
-        document.querySelectorAll('.header-row').forEach(row => {
-            const k = row.querySelector('.h-key').value.trim();
-            const v = row.querySelector('.h-val').value.trim();
-            if (k) headers[k] = v;
+        rows.forEach(({ key, value, enabled }) => {
+            if (enabled && key) headers[key] = value;
         });
         return headers;
+    }
+
+    function newRequestId() {
+        if (crypto.randomUUID) return crypto.randomUUID();
+        // randomUUID gibt es nur in Secure Contexts; per http im Cluster greift dieser Fallback
+        const bytes = crypto.getRandomValues(new Uint8Array(16));
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        const hex = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+        return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    }
+
+    function updateBodyState() {
+        const hint = BODY_HINTS[methodSelect.value];
+        bodyInput.disabled = hint?.disabled ?? false;
+        bodyHint.textContent = hint?.text ?? '';
+        bodyHint.hidden = !hint;
     }
 
     function prepareUIForRequest() {
@@ -412,7 +487,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 responseOutput.innerText = pretty;
             }
         } catch {
-            responseOutput.innerText = data || "Empty Response";
+            responseOutput.innerText = data || "Leere Antwort";
         }
         if (truncatedAt) {
             responseOutput.append(`\n\n[Response nach ${truncatedAt} Bytes gekürzt]`);
@@ -455,7 +530,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function handleNetworkError(msg) {
         responseOutput.innerText = msg;
-        statusBadge.innerText = "Error";
+        statusBadge.innerText = "Fehler";
         statusBadge.className = "badge badge-lg badge-warning";
     }
 
@@ -477,7 +552,8 @@ document.addEventListener('DOMContentLoaded', () => {
             redirectChain: meta.redirectChain ?? null,
             headers: meta.headers ?? null,
             size: meta.size ?? null,
-            truncatedAt: meta.truncatedAt ?? null
+            truncatedAt: meta.truncatedAt ?? null,
+            headerRows: meta.headerRows ?? null
         };
         requestHistory.unshift(entry);
         if (requestHistory.length > 50) requestHistory.pop();
@@ -534,16 +610,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function fillForm(values) {
         document.getElementById('url').value = values.url ?? '';
-        document.getElementById('method').value = values.method ?? 'GET';
-        document.getElementById('body').value = values.body ?? '';
+        methodSelect.value = values.method ?? 'GET';
+        bodyInput.value = values.body ?? '';
         document.getElementById('copyHeaders').checked = values.copyHeaders ?? true;
+        updateBodyState();
 
         headerContainer.innerHTML = '';
-        Object.entries(values.customHeaders ?? {}).forEach(([k, v]) => addHeaderRow(k, v));
+        // Ältere Einträge kennen nur customHeaders (ohne abgeschaltete Zeilen)
+        const rows = values.headerRows
+            ?? Object.entries(values.customHeaders ?? {}).map(([key, value]) => ({ key, value, enabled: true }));
+        rows.forEach(({ key, value, enabled }) => addHeaderRow(key, value, enabled));
     }
 
     function restoreEntry(entry) {
-        fillForm(entry.payload);
+        fillForm({ ...entry.payload, headerRows: entry.headerRows });
         saveFormToStorage();
 
         resetResultUI();
@@ -599,10 +679,10 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify({
                 url: document.getElementById('url').value,
-                method: document.getElementById('method').value,
-                body: document.getElementById('body').value,
+                method: methodSelect.value,
+                body: bodyInput.value,
                 copyHeaders: document.getElementById('copyHeaders').checked,
-                customHeaders: collectHeaders()
+                headerRows: collectHeaderRows()
             }));
         } catch (e) {
             console.error("Fehler beim Speichern der Eingaben im LocalStorage", e);

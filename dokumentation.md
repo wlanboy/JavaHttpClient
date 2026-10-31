@@ -167,10 +167,11 @@ Separater `SSLSocket`-basierter TLS-Probe (unabhängig vom Haupt-Request):
 ### Hauptbereich (linke Spalte)
 
 - HTTP-Method-Dropdown + URL-Feld
-- Dynamische Custom-Header (Key/Value, add/remove)
-- Body-Textarea (JSON)
-- Option: Browser-Header kopieren
-- Buttons: **K8s/Istio Diagnose** | **Send Request**
+- Eigene Header (Name/Wert, hinzufügen/entfernen); jede Zeile hat eine Checkbox, um den Header vorübergehend abzuschalten, ohne ihn zu löschen
+- Vorschläge für gängige Header-Namen (Authorization, x-request-id, traceparent, b3 …) und passende Werte (z. B. frische UUID für `x-request-id`); Header, die der Proxy verwirft (Host, Content-Length, Connection, Accept-Encoding, Upgrade), werden markiert
+- Body-Textarea (JSON); bei GET ausgegraut, bei DELETE mit Hinweis
+- Option **Browser-Header übernehmen**: reicht die Header des Browsers an das Ziel weiter, eigene Header haben Vorrang
+- Buttons: **K8s/Istio Diagnose** | **Request senden**
 
 **Response-Bereich** nach jedem Request:
 

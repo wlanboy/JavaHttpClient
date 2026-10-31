@@ -56,27 +56,36 @@
 
                         <div class="field">
                             <div class="spread mb-2">
-                                <span class="label m-0">Custom Headers</span>
-                                <button type="button" id="addHeaderBtn" class="btn btn-sm btn-outline is-primary">+ Add Header</button>
+                                <span class="label m-0">Eigene Header</span>
+                                <button type="button" id="addHeaderBtn" class="btn btn-sm btn-outline is-primary">+ Header hinzufügen</button>
                             </div>
                             <div id="headerContainer"></div>
+                            <datalist id="headerNameSuggestions"></datalist>
+                            <datalist id="headerValueSuggestions"></datalist>
                         </div>
 
                         <div class="field">
-                            <label class="label" for="body">JSON Body (optional)</label>
-                            <textarea id="body" class="input" rows="4" placeholder='{ "key": "value" }'></textarea>
+                            <label class="label" for="body">Body (optional, JSON)</label>
+                            <textarea id="body" class="input" rows="4" placeholder='{ "key": "value" }' aria-describedby="bodyHint"></textarea>
+                            <p id="bodyHint" class="hint" hidden></p>
                         </div>
 
                         <div class="form-footer">
-                            <label class="switch">
-                                <input type="checkbox" id="copyHeaders" checked>
-                                Mirror Browser Headers
-                            </label>
+                            <div>
+                                <label class="switch" title="Die Header, die dein Browser an diesen Proxy schickt, werden an das Ziel weitergereicht.">
+                                    <input type="checkbox" id="copyHeaders" checked aria-describedby="copyHeadersHint">
+                                    Browser-Header übernehmen
+                                </label>
+                                <p id="copyHeadersHint" class="hint">
+                                    Reicht die Header deines Browsers (z.&nbsp;B. User-Agent, Accept, Cookie, Authorization) an das Ziel weiter.
+                                    Eigene Header haben Vorrang. Host, Content-Length, Connection, Accept-Encoding und Upgrade werden nie übernommen.
+                                </p>
+                            </div>
                             <div class="inline">
                                 <button type="button" id="cancelBtn" class="btn btn-outline is-danger" hidden>Abbrechen</button>
                                 <div class="btn-group">
                                     <button type="button" id="k8sDiagnoseBtn" class="btn btn-outline is-info">K8s/Istio Diagnose</button>
-                                    <button type="submit" id="submitBtn" class="btn btn-primary btn-wide" title="Senden (Strg+Enter)">Send Request</button>
+                                    <button type="submit" id="submitBtn" class="btn btn-primary btn-wide" title="Senden (Strg+Enter)">Request senden</button>
                                 </div>
                             </div>
                         </div>
