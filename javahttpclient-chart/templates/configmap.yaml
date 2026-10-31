@@ -5,9 +5,9 @@ metadata:
 data:
   application.properties: |
     # Endpoints
-    management.endpoints.web.exposure.include=prometheus,health,info,metric
+    management.endpoints.web.exposure.include=prometheus,health,info,metrics
     management.endpoint.health.show-details=always
     # Buildinfo
     spring.config.import=classpath:META-INF/build-info.properties
     # Tracing
-    spring.sleuth.propagation.type=w3c,b3
+    management.tracing.propagation.type=w3c,b3
