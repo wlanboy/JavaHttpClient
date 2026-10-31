@@ -6,6 +6,7 @@ import com.wlanboy.javahttpclient.client.dto.SidecarReport.Diagnosis;
 import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.HttpRouteAnalysis;
 import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.RouteDestination;
 import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.ServiceEntryMatch;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.SidecarEgress;
 import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.VirtualServiceMatch;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -878,5 +879,63 @@ class IstioDiagnosticServiceTest {
         Map<String, Object> spec = Map.of("rules", List.of(Map.of("to", List.of())));
 
         assertTrue(invokeRuleMatchesSourceNamespace(spec, "clients"));
+    }
+
+
+    // =========================================================================
+    // Sidecar egress tests
+    // =========================================================================
+
+    private SidecarEgress correlateWithSidecars(String url, String sourceNamespace, List<Object> sidecars) {
+        IstioDiagnosticService stubbed = new IstioDiagnosticService(K8sClientServiceTest.withoutCluster(),
+                DataSize.ofMegabytes(5), "http://127.0.0.1:15000", CLOSED_PORT) {
+            @Override
+            public List<Object> getIstioResources(String namespace, String type) {
+                return "sidecars".equals(type) && namespace.equals(sourceNamespace) ? sidecars : List.of();
+            }
+        };
+        return stubbed.correlateUrl(url, sourceNamespace).sidecarEgress();
+    }
+
+    private static Map<String, Object> sidecarWithEgressHosts(String... hosts) {
+        return Map.of("spec", Map.of("egress", List.of(Map.of("hosts", List.of(hosts)))));
+    }
+
+    @Test
+    void sidecarEgress_namespaceFilterMatchesTargetNamespace() {
+        SidecarEgress egress = correlateWithSidecars("http://istiod.istio-system.svc.cluster.local:15014/",
+                "clients", List.of(sidecarWithEgressHosts("istio-system/*")));
+
+        assertTrue(egress.restricted());
+        assertTrue(egress.hostAllowed());
+        assertNull(egress.warning());
+    }
+
+    @Test
+    void sidecarEgress_namespaceFilterDoesNotMatchSourceNamespace() {
+        SidecarEgress egress = correlateWithSidecars("http://demo.demo.svc.cluster.local/",
+                "clients", List.of(sidecarWithEgressHosts("clients/*")));
+
+        assertTrue(egress.restricted());
+        assertFalse(egress.hostAllowed());
+        assertNotNull(egress.warning());
+    }
+
+    @Test
+    void sidecarEgress_dotAllowsOnlyOwnNamespace() {
+        List<Object> sidecars = List.of(sidecarWithEgressHosts("./*"));
+
+        assertFalse(correlateWithSidecars("http://demo.demo.svc.cluster.local/", "clients", sidecars).hostAllowed());
+        assertTrue(correlateWithSidecars("http://api.clients.svc.cluster.local/", "clients", sidecars).hostAllowed());
+    }
+
+    @Test
+    void sidecarEgress_withoutEgressSection_isNotRestricted() {
+        SidecarEgress egress = correlateWithSidecars("http://demo.demo.svc.cluster.local/",
+                "clients", List.of(Map.of("spec", Map.of("workloadSelector", Map.of()))));
+
+        assertFalse(egress.restricted());
+        assertNull(egress.hostAllowed());
+        assertNull(egress.warning());
     }
 }

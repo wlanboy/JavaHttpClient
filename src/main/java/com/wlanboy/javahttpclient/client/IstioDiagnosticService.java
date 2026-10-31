@@ -266,7 +266,7 @@ public class IstioDiagnosticService {
                     matchedSes,
                     analyzeAuthorizationPolicies(targetNamespace, targetShortName, sourceNamespace),
                     analyzePeerAuthentications(targetNamespace, targetShortName),
-                    analyzeSidecarEgress(sourceNamespace, host),
+                    analyzeSidecarEgress(sourceNamespace, targetNamespace, host),
                     !matchedVs.isEmpty() || !matchedDrs.isEmpty() || !matchedSes.isEmpty(),
                     null);
         } catch (Exception e) {
@@ -373,8 +373,9 @@ public class IstioDiagnosticService {
      * Prüft, ob ein Sidecar-Resource im Source-Namespace den Egress auf bestimmte Hosts
      * beschränkt (egress-Scoping). Ist der Ziel-Host nicht im Scope, hat der Sidecar
      * keine Cluster-Config dafür – der Request scheitert unabhängig von VS/DR/AuthorizationPolicy.
+     * Ein Sidecar ohne egress-Abschnitt schränkt nichts ein.
      */
-    private SidecarEgress analyzeSidecarEgress(String sourceNamespace, String targetHost) {
+    private SidecarEgress analyzeSidecarEgress(String sourceNamespace, String targetNamespace, String targetHost) {
         List<Object> sidecars = getIstioResources(sourceNamespace, "sidecars");
         if (sidecars.isEmpty()) {
             return new SidecarEgress(false, "Kein Sidecar-Resource im Source-Namespace – kein Egress-Scoping aktiv.",
@@ -382,12 +383,17 @@ public class IstioDiagnosticService {
         }
 
         List<String> checkedHosts = new ArrayList<>();
+        boolean egressScoped = false;
         boolean hostAllowed = false;
         for (Object obj : sidecars) {
             if (!(obj instanceof Map<?, ?> sc)) continue;
             Map<?, ?> spec = (Map<?, ?>) sc.get("spec");
             List<?> egress = spec != null ? (List<?>) spec.get("egress") : null;
-            if (egress == null) continue;
+            if (egress == null || egress.isEmpty()) {
+                hostAllowed = true;
+                continue;
+            }
+            egressScoped = true;
             for (Object egObj : egress) {
                 if (!(egObj instanceof Map<?, ?> eg)) continue;
                 List<?> hosts = (List<?>) eg.get("hosts");
@@ -395,21 +401,37 @@ public class IstioDiagnosticService {
                 for (Object h : hosts) {
                     String hostEntry = h.toString();
                     checkedHosts.add(hostEntry);
-                    if (hostEntry.equals("*/*")) { hostAllowed = true; continue; }
-                    String[] parts = hostEntry.split("/", 2);
-                    String nsFilter = parts[0];
-                    String hostFilter = parts.length > 1 ? parts[1] : "*";
-                    boolean nsOk = nsFilter.equals("*") || nsFilter.equals(".") || nsFilter.equalsIgnoreCase(sourceNamespace);
-                    boolean hostOk = hostFilter.equals("*")
-                            || (targetHost != null && targetHost.equalsIgnoreCase(hostFilter))
-                            || (targetHost != null && hostFilter.startsWith("*.") && targetHost.endsWith(hostFilter.substring(1)));
-                    if (nsOk && hostOk) hostAllowed = true;
+                    if (egressHostMatches(hostEntry, sourceNamespace, targetNamespace, targetHost)) hostAllowed = true;
                 }
             }
+        }
+        if (!egressScoped) {
+            return new SidecarEgress(false, "Sidecar-Resource ohne egress-Abschnitt – kein Egress-Scoping aktiv.",
+                    null, null, null);
         }
         String warning = hostAllowed ? null
                 : "Ziel-Host ist nicht im Sidecar-Egress-Scope des Source-Namespace – Envoy hat evtl. keine Cluster-Config dafür.";
         return new SidecarEgress(true, null, hostAllowed, checkedHosts, warning);
+    }
+
+    /**
+     * Wertet einen Sidecar-Egress-Eintrag "namespace/dnsName" aus. Der Namespace-Teil bezieht sich
+     * auf den Namespace des Ziels: "*" = beliebig, "." = Namespace des Sidecars (Source), "~" = keiner.
+     */
+    private static boolean egressHostMatches(String hostEntry, String sourceNamespace, String targetNamespace, String targetHost) {
+        String[] parts = hostEntry.split("/", 2);
+        String nsFilter = parts.length > 1 ? parts[0] : "*";
+        String hostFilter = parts.length > 1 ? parts[1] : parts[0];
+        boolean nsOk = switch (nsFilter) {
+            case "*" -> true;
+            case "~" -> false;
+            case "." -> targetNamespace.equalsIgnoreCase(sourceNamespace);
+            default -> nsFilter.equalsIgnoreCase(targetNamespace);
+        };
+        boolean hostOk = hostFilter.equals("*")
+                || (targetHost != null && targetHost.equalsIgnoreCase(hostFilter))
+                || (targetHost != null && hostFilter.startsWith("*.") && targetHost.endsWith(hostFilter.substring(1)));
+        return nsOk && hostOk;
     }
 
     private VirtualServiceMatch analyzeVirtualService(Map<?, ?> vs, String namespace, String targetHost, String targetPath, int targetPort) {
