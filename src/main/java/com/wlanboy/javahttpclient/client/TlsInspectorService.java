@@ -5,6 +5,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import javax.net.ssl.*;
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URI;
 import java.security.SecureRandom;
 import java.security.cert.CertificateParsingException;
@@ -20,6 +23,8 @@ import java.util.concurrent.atomic.AtomicReference;
 public class TlsInspectorService {
 
     private static final Logger logger = LoggerFactory.getLogger(TlsInspectorService.class);
+    private static final int CONNECT_TIMEOUT_MS = 5000;
+    private static final int READ_TIMEOUT_MS = 5000;
     private static final DateTimeFormatter ISO = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneOffset.UTC);
 
     public Map<String, Object> inspect(String url) {
@@ -53,8 +58,9 @@ public class TlsInspectorService {
             ctx.init(null, new TrustManager[]{capturingTM}, new SecureRandom());
             SSLSocketFactory factory = ctx.getSocketFactory();
 
-            try (SSLSocket socket = (SSLSocket) factory.createSocket(host, port)) {
-                socket.setSoTimeout(5000);
+            // TCP-Verbindung mit Timeout aufbauen, TLS danach darüberlegen
+            try (Socket raw = connect(host, port);
+                 SSLSocket socket = (SSLSocket) factory.createSocket(raw, host, port, true)) {
 
                 // SNI setzen
                 SSLParameters params = socket.getSSLParameters();
@@ -80,6 +86,18 @@ public class TlsInspectorService {
             result.put("error", e.getMessage());
         }
         return result;
+    }
+
+    private Socket connect(String host, int port) throws IOException {
+        Socket socket = new Socket();
+        try {
+            socket.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MS);
+            socket.setSoTimeout(READ_TIMEOUT_MS);
+            return socket;
+        } catch (IOException e) {
+            socket.close();
+            throw e;
+        }
     }
 
     private List<Map<String, Object>> serializeChain(X509Certificate[] chain) {

@@ -3,6 +3,8 @@ package com.wlanboy.javahttpclient.client;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import org.springframework.util.unit.DataSize;
+
 import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.List;
@@ -16,7 +18,7 @@ class IstioDiagnosticServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new IstioDiagnosticService(K8sClientServiceTest.withoutCluster());
+        service = new IstioDiagnosticService(K8sClientServiceTest.withoutCluster(), DataSize.ofMegabytes(5));
     }
 
     @Test
@@ -241,7 +243,7 @@ class IstioDiagnosticServiceTest {
 
     @Test
     void serviceInitialization_doesNotThrowException() {
-        assertDoesNotThrow(() -> new IstioDiagnosticService(K8sClientServiceTest.withoutCluster()));
+        assertDoesNotThrow(() -> new IstioDiagnosticService(K8sClientServiceTest.withoutCluster(), DataSize.ofMegabytes(5)));
     }
 
     @Test

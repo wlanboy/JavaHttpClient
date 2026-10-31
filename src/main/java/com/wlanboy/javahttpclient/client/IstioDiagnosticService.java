@@ -2,12 +2,19 @@ package com.wlanboy.javahttpclient.client;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.json.JsonParserFactory;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.util.unit.DataSize;
 import org.springframework.web.client.RestClient;
 
+import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -23,16 +30,26 @@ public class IstioDiagnosticService {
             "virtualservices", "destinationrules", "gateways", "serviceentries",
             "sidecars", "envoyfilters", "peerauthentications", "requestauthentications",
             "authorizationpolicies");
+    private static final Duration ENVOY_CONNECT_TIMEOUT = Duration.ofSeconds(2);
+    private static final Duration ENVOY_READ_TIMEOUT = Duration.ofSeconds(10);
 
     private final K8sClientService k8sClientService;
     private final RestClient restClient;
     private final String envoyAdminUrl;
+    private final DataSize maxConfigDumpSize;
 
-    public IstioDiagnosticService(K8sClientService k8sClientService) {
+    public IstioDiagnosticService(K8sClientService k8sClientService,
+            @Value("${istio.envoy.config-dump.max-size:5MB}") DataSize maxConfigDumpSize) {
         this.k8sClientService = k8sClientService;
+        this.maxConfigDumpSize = maxConfigDumpSize;
         this.envoyAdminUrl = System.getenv().getOrDefault("ENVOY_ADMIN_URL", "http://127.0.0.1:15000");
+        // Read-Timeout greift pro Socket-Read, also auch bei hängendem Body
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(ENVOY_CONNECT_TIMEOUT);
+        requestFactory.setReadTimeout(ENVOY_READ_TIMEOUT);
         this.restClient = RestClient.builder()
                 .baseUrl(this.envoyAdminUrl)
+                .requestFactory(requestFactory)
                 .build();
         logger.info("Istio Diagnostic Service initialisiert (K8s API verfügbar: {}).", k8sClientService.isInitialized());
     }
@@ -74,7 +91,7 @@ public class IstioDiagnosticService {
         try {
             // Sektion A: Erreichbarkeit
             Map<String, Object> reachability = new HashMap<>();
-            reachability.put("envoyConfig", restClient.get().uri("/config_dump").retrieve().body(Map.class));
+            reachability.put("envoyConfig", fetchConfigDump());
             String clusters = restClient.get().uri("/clusters").retrieve().body(String.class);
             reachability.put("activeEndpoints", clusters);
             reachability.put("summary", summarizeClusters(clusters));
@@ -97,6 +114,34 @@ public class IstioDiagnosticService {
             report.put("error", "Envoy Admin API Fehler: " + e.getMessage());
         }
         return report;
+    }
+
+    /**
+     * Lädt /config_dump nur bis maxConfigDumpSize. Größere Dumps werden nicht geparst,
+     * weil die Map ein Vielfaches des JSON-Texts im Heap belegt.
+     */
+    private Object fetchConfigDump() {
+        int maxBytes = Math.toIntExact(maxConfigDumpSize.toBytes());
+        return restClient.get().uri("/config_dump").exchange((request, response) -> {
+            if (response.getStatusCode().isError()) {
+                throw new IllegalStateException("config_dump lieferte HTTP " + response.getStatusCode().value());
+            }
+            byte[] bytes;
+            try (InputStream in = response.getBody()) {
+                bytes = in.readNBytes(maxBytes + 1);
+            }
+            if (bytes.length > maxBytes) {
+                logger.warn("Envoy config_dump größer als {}, wird nicht geparst", maxConfigDumpSize);
+                Map<String, Object> hint = new LinkedHashMap<>();
+                hint.put("truncated", true);
+                hint.put("maxBytes", maxBytes);
+                hint.put("error", "config_dump ist größer als " + maxConfigDumpSize
+                        + " und wurde nicht geladen. Limit über istio.envoy.config-dump.max-size anpassen"
+                        + " oder gefiltert abrufen (z. B. /config_dump?resource=dynamic_active_clusters).");
+                return hint;
+            }
+            return JsonParserFactory.getJsonParser().parseMap(new String(bytes, StandardCharsets.UTF_8));
+        });
     }
 
     private static final Pattern OUTBOUND_CLUSTER_PATTERN = Pattern.compile("^outbound\\|(\\d+)\\|([^|]*)\\|(.+)$");

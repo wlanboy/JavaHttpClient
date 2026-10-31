@@ -6,6 +6,7 @@ import org.junit.jupiter.api.*;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.unit.DataSize;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -31,6 +32,17 @@ class ClientServiceTest {
         server = HttpServer.create(new InetSocketAddress(0), 0);
         port = server.getAddress().getPort();
         server.setExecutor(Executors.newFixedThreadPool(4));
+
+        // Großer Response für das Body-Limit
+        server.createContext("/large", exchange -> {
+            byte[] response = "x".repeat(10_000).getBytes();
+            exchange.sendResponseHeaders(200, response.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(response);
+            } catch (IOException ignored) {
+                // Client bricht nach dem Limit ab
+            }
+        });
 
         // GET endpoint
         server.createContext("/get", exchange -> {
@@ -138,7 +150,7 @@ class ClientServiceTest {
 
     @BeforeEach
     void setUp() {
-        clientService = new ClientService(true);
+        clientService = new ClientService(true, DataSize.ofMegabytes(5));
     }
 
     private String baseUrl() {
@@ -160,6 +172,43 @@ class ClientServiceTest {
 
         assertEquals(200, response.getStatusCode().value());
         assertEquals("GET Success", response.getBody());
+    }
+
+    @Test
+    void sendRequest_withBodyAboveLimit_truncatesAndSetsHeader() {
+        ClientService limited = new ClientService(true, DataSize.ofBytes(1000));
+        JavaHttpRequest request = new JavaHttpRequest(
+                baseUrl() + "/large",
+                HttpMethod.GET,
+                null,
+                null,
+                false,
+                null
+        );
+
+        ResponseEntity<String> response = limited.sendRequest(request, new HttpHeaders());
+
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals(1000, response.getBody().length());
+        assertEquals("1000", response.getHeaders().getFirst("X-Body-Truncated"));
+        assertNull(response.getHeaders().getFirst(HttpHeaders.CONTENT_LENGTH));
+    }
+
+    @Test
+    void sendRequest_withBodyBelowLimit_hasNoTruncationHeader() {
+        JavaHttpRequest request = new JavaHttpRequest(
+                baseUrl() + "/large",
+                HttpMethod.GET,
+                null,
+                null,
+                false,
+                null
+        );
+
+        ResponseEntity<String> response = clientService.sendRequest(request, new HttpHeaders());
+
+        assertEquals(10_000, response.getBody().length());
+        assertNull(response.getHeaders().getFirst("X-Body-Truncated"));
     }
 
     @Test
@@ -332,7 +381,7 @@ class ClientServiceTest {
 
     @Test
     void sendRequest_withStacktraceDisabled_returns502WithoutStacktrace() {
-        ClientService withoutStacktrace = new ClientService(false);
+        ClientService withoutStacktrace = new ClientService(false, DataSize.ofMegabytes(5));
         JavaHttpRequest request = new JavaHttpRequest(
                 "http://nonexistent.invalid.host.test/path",
                 HttpMethod.GET,

@@ -10,7 +10,6 @@ import java.net.http.HttpClient.Redirect;
 import java.net.http.HttpClient.Version;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.net.http.HttpResponse.BodyHandlers;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -25,7 +24,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.util.unit.DataSize;
 
+import com.wlanboy.javahttpclient.client.LimitedBodyHandler.LimitedBody;
 import com.wlanboy.javahttpclient.controller.JavaHttpRequest;
 
 @Service
@@ -44,9 +45,14 @@ public class ClientService {
 	private final HttpClient client;
 	private final HttpClient clientHttp11;
 	private final boolean includeStacktrace;
+	private final DataSize maxBodySize;
+	private final LimitedBodyHandler bodyHandler;
 
-	public ClientService(@Value("${httpclient.error.include-stacktrace:true}") boolean includeStacktrace) {
+	public ClientService(@Value("${httpclient.error.include-stacktrace:true}") boolean includeStacktrace,
+			@Value("${httpclient.response.max-body-size:5MB}") DataSize maxBodySize) {
 		this.includeStacktrace = includeStacktrace;
+		this.maxBodySize = maxBodySize;
+		this.bodyHandler = new LimitedBodyHandler(Math.toIntExact(maxBodySize.toBytes()));
 		client = HttpClient.newBuilder()
 				.version(Version.HTTP_2)
 				.followRedirects(Redirect.NEVER)
@@ -72,21 +78,20 @@ public class ClientService {
 			String resolvedIps = resolveDns(currentUri.getHost());
 
 			// Erster Request mit HTTP/2, Fallback auf HTTP/1.1 bei Verbindungs- oder Protokollfehler
-			record RequestResult(HttpClient activeClient, HttpResponse<String> response, boolean usedFallback) {}
+			record RequestResult(HttpClient activeClient, HttpResponse<LimitedBody> response, boolean usedFallback) {}
 			RequestResult initial;
 			try {
-				HttpResponse<String> h2response = client.send(
+				HttpResponse<LimitedBody> h2response = client.send(
 						buildRequest(currentUri, currentMethod, currentBody, requestData, incomingHeaders),
-						BodyHandlers.ofString());
+						bodyHandler);
 				// 502 mit Envoy-Protokollfehler → HTTP/2 wird vom Upstream nicht unterstützt
 				boolean isProtocolError = h2response.statusCode() == 502
-						&& h2response.body() != null
-						&& h2response.body().contains("protocol error");
+						&& h2response.body().text().contains("protocol error");
 				if (isProtocolError) {
 					logger.warn("HTTP/2 502 protocol error, Fallback auf HTTP/1.1");
 					initial = new RequestResult(clientHttp11,
 							clientHttp11.send(buildRequest(currentUri, currentMethod, currentBody, requestData, incomingHeaders),
-									BodyHandlers.ofString()),
+									bodyHandler),
 							true);
 				} else {
 					initial = new RequestResult(client, h2response, false);
@@ -99,11 +104,11 @@ public class ClientService {
 				logger.warn("HTTP/2 Verbindungsfehler ({}), Fallback auf HTTP/1.1", e.getMessage());
 				initial = new RequestResult(clientHttp11,
 						clientHttp11.send(buildRequest(currentUri, currentMethod, currentBody, requestData, incomingHeaders),
-								BodyHandlers.ofString()),
+								bodyHandler),
 						true);
 			}
 			HttpClient activeClient = initial.activeClient();
-			HttpResponse<String> response = initial.response();
+			HttpResponse<LimitedBody> response = initial.response();
 			boolean usedFallback = initial.usedFallback();
 
 			// Redirects manuell verfolgen
@@ -135,12 +140,19 @@ public class ClientService {
 				// Folge-Requests ohne originale Browser-Header (kein Auth-Leak)
 				response = activeClient.send(
 						buildRequest(currentUri, currentMethod, currentBody, null, null),
-						BodyHandlers.ofString());
+						bodyHandler);
 			}
 
 			HttpHeaders responseHeaders = new HttpHeaders();
 			response.headers().map().forEach(responseHeaders::addAll);
 			String protocolVersion = response.version() == Version.HTTP_2 ? "HTTP/2" : "HTTP/1.1";
+			boolean truncated = response.body().truncated();
+			if (truncated) {
+				// Upstream-Länge passt nicht mehr zum gekürzten Body
+				responseHeaders.remove(HttpHeaders.CONTENT_LENGTH);
+				responseHeaders.remove(HttpHeaders.TRANSFER_ENCODING);
+				logger.warn("Response von {} größer als {}, Body wurde gekürzt", currentUri, maxBodySize);
+			}
 
 			return ResponseEntity.status(response.statusCode())
 					.headers(h -> {
@@ -148,6 +160,7 @@ public class ClientService {
 						h.set("X-Protocol-Version", protocolVersion);
 						if (usedFallback) h.set("X-Protocol-Fallback", "HTTP/1.1");
 						if (resolvedIps != null) h.set("X-Resolved-IP", resolvedIps);
+						if (truncated) h.set("X-Body-Truncated", String.valueOf(maxBodySize.toBytes()));
 						if (!redirectChain.isEmpty()) {
 							String chain = serializeChain(redirectChain);
 							if (chain.length() > MAX_REDIRECT_CHAIN_HEADER_LENGTH) {
@@ -156,7 +169,7 @@ public class ClientService {
 							h.set("X-Redirect-Chain", chain);
 						}
 					})
-					.body(response.body());
+					.body(response.body().text());
 
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
