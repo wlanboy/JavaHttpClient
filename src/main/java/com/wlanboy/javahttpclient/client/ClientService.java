@@ -33,6 +33,9 @@ public class ClientService {
 	private static final Set<String> BAD_HEADERS = Set.of(
 			"host", "content-length", "connection", "accept-encoding", "upgrade"
 	);
+	private static final Set<String> IDEMPOTENT_METHODS = Set.of(
+			"GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELETE"
+	);
 	private static final Set<Integer> REDIRECT_CODES = Set.of(301, 302, 303, 307, 308);
 	private static final int MAX_REDIRECTS = 10;
 	private static final int MAX_REDIRECT_CHAIN_HEADER_LENGTH = 4096;
@@ -86,6 +89,10 @@ public class ClientService {
 					initial = new RequestResult(client, h2response, false);
 				}
 			} catch (IOException e) {
+				if (!isSafeToRetry(currentMethod, e)) {
+					// Request könnte das Ziel bereits erreicht haben → kein zweiter Versuch
+					throw e;
+				}
 				logger.warn("HTTP/2 Verbindungsfehler ({}), Fallback auf HTTP/1.1", e.getMessage());
 				initial = new RequestResult(clientHttp11,
 						clientHttp11.send(buildRequest(currentUri, currentMethod, currentBody, requestData, incomingHeaders),
@@ -162,6 +169,17 @@ public class ClientService {
 					.header("Content-Type", "text/plain; charset=UTF-8")
 					.body(errorDetail);
 		}
+	}
+
+	/**
+	 * Fallback nur, wenn eine Wiederholung keine Seiteneffekte doppelt auslösen kann:
+	 * idempotente Methoden (RFC 9110) oder Fehler, bevor der Request gesendet wurde.
+	 */
+	private boolean isSafeToRetry(String method, IOException e) {
+		return IDEMPOTENT_METHODS.contains(method)
+				|| e instanceof java.net.ConnectException
+				|| e instanceof java.net.http.HttpConnectTimeoutException
+				|| e instanceof javax.net.ssl.SSLHandshakeException;
 	}
 
 	private HttpRequest buildRequest(URI uri, String method, String body,
@@ -271,7 +289,7 @@ public class ClientService {
 			summary = "Verbindung abgelehnt: Der Ziel-Port ist zu oder der Pod läuft nicht.";
 		} else if (e instanceof java.net.http.HttpConnectTimeoutException) {
 			summary = "Timeout: Verbindung dauerte zu lange. (NetworkPolicy Blockade?)";
-		} else if (e instanceof java.lang.IllegalArgumentException && e.getMessage().contains("URI")) {
+		} else if (e instanceof java.lang.IllegalArgumentException && detail.contains("URI")) {
 			summary = "Ungültige URL: Das Format der Ziel-Adresse ist fehlerhaft.";
 		}
 

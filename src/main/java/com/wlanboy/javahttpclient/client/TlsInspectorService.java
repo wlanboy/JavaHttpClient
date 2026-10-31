@@ -69,7 +69,7 @@ public class TlsInspectorService {
                 X509Certificate[] chain = chainRef.get();
                 if (chain != null && chain.length > 0) {
                     String spiffe = extractSpiffe(chain[0]);
-                    result.put("hasSpiffeIdentity", spiffe != null);
+                    result.put("isMtls", spiffe != null);
                     if (spiffe != null) result.put("spiffeId", spiffe);
                     result.put("chain", serializeChain(chain));
                 }

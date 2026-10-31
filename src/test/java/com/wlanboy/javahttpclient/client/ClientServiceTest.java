@@ -7,11 +7,16 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.util.Map;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -573,6 +578,70 @@ class ClientServiceTest {
         String resolvedIp = response.getHeaders().getFirst("X-Resolved-IP");
         assertNotNull(resolvedIp, "X-Resolved-IP header must be present when targeting localhost");
         assertFalse(resolvedIp.isBlank(), "X-Resolved-IP header must not be empty");
+    }
+
+    /**
+     * Startet einen Server, der den Request-Header liest und die Verbindung ohne Antwort schließt.
+     * Der Client erhält eine IOException, nachdem der Request bereits gesendet wurde.
+     */
+    private static ServerSocket startDroppingServer(AtomicInteger requestCount) throws IOException {
+        ServerSocket serverSocket = new ServerSocket(0);
+        Thread acceptor = new Thread(() -> {
+            while (!serverSocket.isClosed()) {
+                try (Socket socket = serverSocket.accept()) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                    String line;
+                    while ((line = reader.readLine()) != null && !line.isEmpty()) {
+                        // Header überspringen
+                    }
+                    requestCount.incrementAndGet();
+                } catch (IOException ignored) {
+                }
+            }
+        });
+        acceptor.setDaemon(true);
+        acceptor.start();
+        return serverSocket;
+    }
+
+    @Test
+    void sendRequest_postWithConnectionDroppedAfterSend_isNotRetried() throws IOException {
+        AtomicInteger requestCount = new AtomicInteger();
+        try (ServerSocket droppingServer = startDroppingServer(requestCount)) {
+            JavaHttpRequest request = new JavaHttpRequest(
+                    "http://localhost:" + droppingServer.getLocalPort() + "/drop",
+                    HttpMethod.POST,
+                    "{\"order\": 1}",
+                    "application/json",
+                    false,
+                    null
+            );
+
+            ResponseEntity<String> response = clientService.sendRequest(request, new HttpHeaders());
+
+            assertEquals(502, response.getStatusCode().value());
+            assertEquals(1, requestCount.get(), "POST darf nach gesendetem Request nicht wiederholt werden");
+        }
+    }
+
+    @Test
+    void sendRequest_getWithConnectionDroppedAfterSend_fallsBackToHttp11() throws IOException {
+        AtomicInteger requestCount = new AtomicInteger();
+        try (ServerSocket droppingServer = startDroppingServer(requestCount)) {
+            JavaHttpRequest request = new JavaHttpRequest(
+                    "http://localhost:" + droppingServer.getLocalPort() + "/drop",
+                    HttpMethod.GET,
+                    null,
+                    null,
+                    false,
+                    null
+            );
+
+            ResponseEntity<String> response = clientService.sendRequest(request, new HttpHeaders());
+
+            assertEquals(502, response.getStatusCode().value());
+            assertTrue(requestCount.get() >= 2, "GET muss per HTTP/1.1-Fallback wiederholt werden");
+        }
     }
 
     @Test
