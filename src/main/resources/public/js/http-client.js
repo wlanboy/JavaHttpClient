@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const headerContainer = document.getElementById('headerContainer');
     const addHeaderBtn = document.getElementById('addHeaderBtn');
     const submitBtn = document.getElementById('submitBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
     const resultArea = document.getElementById('resultArea');
     const responseOutput = document.getElementById('responseOutput');
     const errorBox = document.getElementById('errorBox');
@@ -20,17 +21,35 @@ document.addEventListener('DOMContentLoaded', () => {
     const emptyHistoryMsg = document.getElementById('emptyHistoryMsg');
     const clearHistoryBtn = document.getElementById('clearHistoryBtn');
     const exportHistoryBtn = document.getElementById('exportHistoryBtn');
+    const urlHistoryList = document.getElementById('urlHistory');
 
     let requestHistory = [];
     let tlsRequestId = 0;
+    let activeRequest = null;
+    const submitBtnLabel = submitBtn.textContent;
     const STORAGE_KEY = 'k8s_http_client_history';
+    const FORM_STORAGE_KEY = 'k8s_http_client_form';
 
     // --- INITIALISIERUNG ---
     loadHistoryFromStorage();
-    addHeaderRow('Content-Type', 'application/json');
+    if (!loadFormFromStorage()) addHeaderRow('Content-Type', 'application/json');
 
     // --- EVENT LISTENER ---
     addHeaderBtn.addEventListener('click', () => addHeaderRow());
+
+    // Letzte Eingaben merken, damit sie einen Reload überstehen
+    form.addEventListener('input', saveFormToStorage);
+    form.addEventListener('change', saveFormToStorage);
+
+    // Strg+Enter (bzw. Cmd+Enter) sendet aus jedem Feld, auch aus dem Body
+    form.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            form.requestSubmit();
+        }
+    });
+
+    cancelBtn.addEventListener('click', () => activeRequest?.abort());
 
     // KORREKTUR: Robuster Toggle-Mechanismus
     if (toggleStackBtn) {
@@ -59,6 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- CORE FUNKTIONEN ---
 
     async function performRequest() {
+        if (activeRequest) return;
         const startTime = Date.now();
         const payload = {
             url: document.getElementById('url').value,
@@ -68,13 +88,15 @@ document.addEventListener('DOMContentLoaded', () => {
             customHeaders: collectHeaders()
         };
 
+        activeRequest = new AbortController();
         prepareUIForRequest();
 
         try {
             const response = await fetch('/client', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
+                signal: activeRequest.signal
             });
 
             const duration = Date.now() - startTime;
@@ -97,12 +119,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     responseOutput.innerText += `\n\n[Response nach ${truncatedAt} Bytes gekürzt]`;
                 }
             }
+            scrollToResult();
         } catch (err) {
-            const errorMsg = "Netzwerkfehler zum Proxy: " + err.message;
-            handleNetworkError(errorMsg);
-            addToHistory(payload, 0, 0, errorMsg);
+            if (err.name === 'AbortError') {
+                handleAbort();
+            } else {
+                const errorMsg = "Netzwerkfehler zum Proxy: " + err.message;
+                handleNetworkError(errorMsg);
+                addToHistory(payload, 0, 0, errorMsg);
+                scrollToResult();
+            }
         } finally {
-            submitBtn.disabled = false;
+            activeRequest = null;
+            setLoading(false);
         }
     }
 
@@ -116,7 +145,10 @@ document.addEventListener('DOMContentLoaded', () => {
             <input type="text" class="input input-sm h-val" placeholder="Value" value="${escapeHtml(value)}">
             <button type="button" class="btn btn-sm btn-outline is-danger remove-header" title="Header entfernen">✕</button>
         `;
-        div.querySelector('.remove-header').onclick = () => div.remove();
+        div.querySelector('.remove-header').onclick = () => {
+            div.remove();
+            saveFormToStorage();
+        };
         headerContainer.appendChild(div);
     }
 
@@ -131,9 +163,30 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function prepareUIForRequest() {
-        submitBtn.disabled = true;
+        setLoading(true);
         resetResultUI();
+        statusBadge.innerText = 'Sende…';
+        statusBadge.className = 'badge badge-lg badge-secondary';
+        responseTimeText.innerText = '';
         responseOutput.innerText = "Sende Request an Cluster...";
+    }
+
+    function setLoading(loading) {
+        submitBtn.disabled = loading;
+        cancelBtn.hidden = !loading;
+        if (loading) {
+            submitBtn.innerHTML = `<span class="spinner spinner-sm" aria-hidden="true"></span> Sende…`;
+        } else {
+            submitBtn.textContent = submitBtnLabel;
+        }
+    }
+
+    // Scrollt nur, wenn der Anfang des Ergebnisbereichs nicht im sichtbaren Bereich liegt
+    function scrollToResult() {
+        const top = resultArea.getBoundingClientRect().top;
+        if (top >= 0 && top < window.innerHeight * 0.75) return;
+        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        resultArea.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
     }
 
     // Entfernt alle Anzeigen des vorherigen Requests (Badges, TLS, Redirects, Stacktrace)
@@ -320,6 +373,12 @@ document.addEventListener('DOMContentLoaded', () => {
         statusBadge.className = "badge badge-lg badge-warning";
     }
 
+    function handleAbort() {
+        responseOutput.innerText = "Request im Browser abgebrochen. Der Proxy wartet serverseitig ggf. noch bis zu seinem Timeout auf die Antwort.";
+        statusBadge.innerText = "Abgebrochen";
+        statusBadge.className = "badge badge-lg badge-secondary";
+    }
+
     // --- HISTORIE & EXPORT ---
 
     function addToHistory(payload, status, duration, responseData, meta = {}) {
@@ -341,6 +400,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderHistory() {
         emptyHistoryMsg.style.display = requestHistory.length ? 'none' : 'block';
         historyList.innerHTML = '';
+
+        const urls = [...new Set(requestHistory.map(entry => entry.payload.url))];
+        urlHistoryList.innerHTML = urls.map(url => `<option value="${escapeHtml(url)}"></option>`).join('');
 
         requestHistory.forEach((entry) => {
             const isErr = entry.status >= 400 || entry.status === 0;
@@ -381,14 +443,19 @@ document.addEventListener('DOMContentLoaded', () => {
         renderHistory();
     }
 
-    function restoreEntry(entry) {
-        document.getElementById('url').value = entry.payload.url;
-        document.getElementById('method').value = entry.payload.method;
-        document.getElementById('body').value = entry.payload.body;
-        document.getElementById('copyHeaders').checked = entry.payload.copyHeaders;
+    function fillForm(values) {
+        document.getElementById('url').value = values.url ?? '';
+        document.getElementById('method').value = values.method ?? 'GET';
+        document.getElementById('body').value = values.body ?? '';
+        document.getElementById('copyHeaders').checked = values.copyHeaders ?? true;
 
         headerContainer.innerHTML = '';
-        Object.entries(entry.payload.customHeaders).forEach(([k, v]) => addHeaderRow(k, v));
+        Object.entries(values.customHeaders ?? {}).forEach(([k, v]) => addHeaderRow(k, v));
+    }
+
+    function restoreEntry(entry) {
+        fillForm(entry.payload);
+        saveFormToStorage();
 
         resetResultUI();
         updateResponseMetadata(entry.status, entry.duration, entry.protocol, entry.resolvedIp);
@@ -402,6 +469,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             handleSuccess(entry.responseData);
         }
+        scrollToResult();
     }
 
     function exportHistoryToJson() {
@@ -433,6 +501,33 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.error("Fehler beim Laden aus LocalStorage", e);
             requestHistory = [];
+        }
+    }
+
+    function saveFormToStorage() {
+        try {
+            localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify({
+                url: document.getElementById('url').value,
+                method: document.getElementById('method').value,
+                body: document.getElementById('body').value,
+                copyHeaders: document.getElementById('copyHeaders').checked,
+                customHeaders: collectHeaders()
+            }));
+        } catch (e) {
+            console.error("Fehler beim Speichern der Eingaben im LocalStorage", e);
+        }
+    }
+
+    // Liefert true, wenn gespeicherte Eingaben wiederhergestellt wurden
+    function loadFormFromStorage() {
+        try {
+            const saved = localStorage.getItem(FORM_STORAGE_KEY);
+            if (!saved) return false;
+            fillForm(JSON.parse(saved));
+            return true;
+        } catch (e) {
+            console.error("Fehler beim Laden der Eingaben aus LocalStorage", e);
+            return false;
         }
     }
 });

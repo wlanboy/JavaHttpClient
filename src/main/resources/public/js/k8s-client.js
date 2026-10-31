@@ -548,6 +548,20 @@ const K8sClient = (() => {
 // Navbar & Event Listener
 // =============================================================================
 
+// Tauscht nur Schema, Host und Port aus; Pfad, Query und Fragment der bisherigen URL bleiben erhalten
+function withServiceOrigin(serviceUrl, currentUrl) {
+    const current = currentUrl.trim();
+    if (current.startsWith('/')) return serviceUrl + current;
+    try {
+        const parsed = new URL(current);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return serviceUrl;
+        const rest = parsed.pathname + parsed.search + parsed.hash;
+        return rest === '/' ? serviceUrl : serviceUrl + rest;
+    } catch {
+        return serviceUrl;
+    }
+}
+
 async function refreshEnvoyServiceSelect() {
     const select = document.getElementById('envoyServiceSelect');
     if (!select) return;
@@ -611,7 +625,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (serviceSelect) {
         serviceSelect.addEventListener('change', () => {
             if (serviceSelect.value) {
-                document.getElementById('url').value = serviceSelect.value;
+                const urlInput = document.getElementById('url');
+                urlInput.value = withServiceOrigin(serviceSelect.value, urlInput.value);
+                urlInput.dispatchEvent(new Event('input', { bubbles: true }));
             }
         });
     }
