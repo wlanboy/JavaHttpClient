@@ -29,16 +29,6 @@
                 "summary": "HTTP-Request weiterleiten",
                 "description": "Sendet einen HTTP-Request mit der angegebenen Methode, URL und optionalem Body an das Ziel-System",
                 "operationId": "postMapping",
-                "parameters": [
-                    {
-                        "name": "headers",
-                        "in": "header",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/components/schemas/HttpHeaders"
-                        }
-                    }
-                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -95,8 +85,7 @@
                         "content": {
                             "*/*": {
                                 "schema": {
-                                    "type": "object",
-                                    "additionalProperties": {}
+                                    "$ref": "#/components/schemas/TlsInspection"
                                 }
                             }
                         }
@@ -118,8 +107,32 @@
                         "content": {
                             "*/*": {
                                 "schema": {
-                                    "type": "object",
-                                    "additionalProperties": {}
+                                    "$ref": "#/components/schemas/K8sStatus"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/k8s/services": {
+            "get": {
+                "tags": [
+                    "Kubernetes Diagnostics"
+                ],
+                "summary": "Über Envoy erreichbare Services auflisten",
+                "description": "Parst die Envoy Admin API (/clusters) und liefert alle über den Sidecar erreichbaren Outbound-Services mit Host und Port, z.B. für ein Service-Auswahl-Dropdown.",
+                "operationId": "getReachableServices",
+                "responses": {
+                    "200": {
+                        "description": "Liste der über Envoy erreichbaren Services",
+                        "content": {
+                            "*/*": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/ReachableService"
+                                    }
                                 }
                             }
                         }
@@ -173,7 +186,14 @@
                         }
                     },
                     "400": {
-                        "description": "Ungültiger Ressourcentyp"
+                        "description": "Ungültiger Ressourcentyp",
+                        "content": {
+                            "*/*": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ErrorResponse"
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -192,8 +212,7 @@
                         "content": {
                             "*/*": {
                                 "schema": {
-                                    "type": "object",
-                                    "additionalProperties": {}
+                                    "$ref": "#/components/schemas/SidecarReport"
                                 }
                             }
                         }
@@ -206,8 +225,8 @@
                 "tags": [
                     "Kubernetes Diagnostics"
                 ],
-                "summary": "URL mit VirtualService/DestinationRule korrelieren",
-                "description": "Prüft ob die angegebene URL durch einen VirtualService abgedeckt ist und welche Routen/DestinationRules zutreffen.",
+                "summary": "URL mit Istio-Config korrelieren",
+                "description": "Prüft ob die angegebene URL durch VirtualService/DestinationRule/ServiceEntry abgedeckt ist und ob AuthorizationPolicy/PeerAuthentication/Sidecar-Egress den Zugriff erlauben. Der Ziel-Namespace wird automatisch aus dem FQDN-Host abgeleitet (service.namespace.svc.cluster.local) und zusätzlich zum übergebenen Source-Namespace abgefragt.",
                 "operationId": "correlateUrl",
                 "parameters": [
                     {
@@ -223,7 +242,7 @@
                     {
                         "name": "namespace",
                         "in": "query",
-                        "description": "Kubernetes-Namespace",
+                        "description": "Source-Namespace (Namespace des Aufrufers)",
                         "required": false,
                         "schema": {
                             "type": "string",
@@ -238,8 +257,7 @@
                         "content": {
                             "*/*": {
                                 "schema": {
-                                    "type": "object",
-                                    "additionalProperties": {}
+                                    "$ref": "#/components/schemas/UrlCorrelation"
                                 }
                             }
                         }
@@ -261,8 +279,7 @@
                         "content": {
                             "*/*": {
                                 "schema": {
-                                    "type": "object",
-                                    "additionalProperties": {}
+                                    "$ref": "#/components/schemas/K8sContext"
                                 }
                             }
                         }
@@ -327,320 +344,561 @@
                     "url"
                 ]
             },
-            "ContentDisposition": {
+            "CertificateInfo": {
                 "type": "object",
+                "description": "Zertifikat aus der Server-Chain",
                 "properties": {
+                    "index": {
+                        "type": "integer",
+                        "format": "int32"
+                    },
                     "type": {
+                        "type": "string",
+                        "enum": [
+                            "leaf",
+                            "intermediate",
+                            "root"
+                        ]
+                    },
+                    "subject": {
                         "type": "string"
                     },
-                    "name": {
+                    "issuer": {
                         "type": "string"
                     },
-                    "filename": {
+                    "serial": {
                         "type": "string"
                     },
-                    "charset": {
+                    "validFrom": {
                         "type": "string"
                     },
-                    "attachment": {
+                    "validTo": {
+                        "type": "string"
+                    },
+                    "daysUntilExpiry": {
+                        "type": "integer",
+                        "format": "int64"
+                    },
+                    "expired": {
                         "type": "boolean"
                     },
-                    "formData": {
-                        "type": "boolean"
-                    },
-                    "inline": {
-                        "type": "boolean"
+                    "subjectAltNames": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
                     }
                 }
             },
-            "HttpHeaders": {
+            "TlsInspection": {
                 "type": "object",
+                "description": "Ergebnis der TLS-Inspektion",
                 "properties": {
-                    "empty": {
-                        "type": "boolean"
-                    },
-                    "location": {
-                        "type": "string",
-                        "format": "uri"
-                    },
                     "host": {
-                        "type": "object",
-                        "properties": {
-                            "address": {
-                                "type": "object",
-                                "properties": {
-                                    "address": {
-                                        "type": "string",
-                                        "format": "byte"
-                                    },
-                                    "hostAddress": {
-                                        "type": "string"
-                                    },
-                                    "linkLocalAddress": {
-                                        "type": "boolean"
-                                    },
-                                    "hostName": {
-                                        "type": "string"
-                                    },
-                                    "multicastAddress": {
-                                        "type": "boolean"
-                                    },
-                                    "anyLocalAddress": {
-                                        "type": "boolean"
-                                    },
-                                    "loopbackAddress": {
-                                        "type": "boolean"
-                                    },
-                                    "siteLocalAddress": {
-                                        "type": "boolean"
-                                    },
-                                    "mcglobal": {
-                                        "type": "boolean"
-                                    },
-                                    "mcnodeLocal": {
-                                        "type": "boolean"
-                                    },
-                                    "mclinkLocal": {
-                                        "type": "boolean"
-                                    },
-                                    "mcsiteLocal": {
-                                        "type": "boolean"
-                                    },
-                                    "mcorgLocal": {
-                                        "type": "boolean"
-                                    },
-                                    "canonicalHostName": {
-                                        "type": "string"
-                                    }
-                                }
-                            },
-                            "port": {
-                                "type": "integer",
-                                "format": "int32"
-                            },
-                            "hostName": {
-                                "type": "string"
-                            },
-                            "unresolved": {
-                                "type": "boolean"
-                            },
-                            "hostString": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "all": {
-                        "type": "object",
-                        "additionalProperties": {
-                            "type": "string"
-                        },
-                        "writeOnly": true
-                    },
-                    "lastModified": {
-                        "type": "integer",
-                        "format": "int64"
-                    },
-                    "date": {
-                        "type": "integer",
-                        "format": "int64"
-                    },
-                    "contentLength": {
-                        "type": "integer",
-                        "format": "int64"
-                    },
-                    "contentDisposition": {
-                        "$ref": "#/components/schemas/ContentDisposition"
-                    },
-                    "acceptCharset": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "range": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/HttpRange"
-                        }
-                    },
-                    "cacheControl": {
                         "type": "string"
                     },
-                    "origin": {
+                    "port": {
+                        "type": "integer",
+                        "format": "int32"
+                    },
+                    "tlsVersion": {
                         "type": "string"
                     },
-                    "connection": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
+                    "cipherSuite": {
+                        "type": "string"
                     },
-                    "acceptLanguage": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "range": {
-                                    "type": "string"
-                                },
-                                "weight": {
-                                    "type": "number",
-                                    "format": "double"
-                                }
-                            }
-                        }
-                    },
-                    "basicAuth": {
-                        "type": "string",
-                        "writeOnly": true
-                    },
-                    "accept": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/MediaType"
-                        }
-                    },
-                    "acceptLanguageAsLocales": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "acceptPatch": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/MediaType"
-                        }
-                    },
-                    "accessControlAllowCredentials": {
+                    "isMtls": {
                         "type": "boolean"
                     },
-                    "accessControlAllowHeaders": {
+                    "spiffeId": {
+                        "type": "string",
+                        "description": "Nur gesetzt bei SPIFFE-Zertifikat (Istio mTLS)"
+                    },
+                    "chain": {
                         "type": "array",
                         "items": {
-                            "type": "string"
+                            "$ref": "#/components/schemas/CertificateInfo"
                         }
                     },
-                    "accessControlAllowMethods": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/HttpMethod"
-                        }
-                    },
-                    "accessControlAllowOrigin": {
+                    "error": {
                         "type": "string"
+                    }
+                }
+            },
+            "K8sStatus": {
+                "type": "object",
+                "description": "Initialisierungsstatus des Kubernetes API Clients",
+                "properties": {
+                    "initialized": {
+                        "type": "boolean"
                     },
-                    "accessControlExposeHeaders": {
+                    "supportedIstioTypes": {
                         "type": "array",
                         "items": {
                             "type": "string"
-                        }
-                    },
-                    "accessControlMaxAge": {
-                        "type": "integer",
-                        "format": "int64"
-                    },
-                    "accessControlRequestHeaders": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "accessControlRequestMethod": {
-                        "$ref": "#/components/schemas/HttpMethod"
-                    },
-                    "allow": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/HttpMethod"
                         },
                         "uniqueItems": true
                     },
-                    "etag": {
-                        "type": "string"
+                    "istioVersionsProbed": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
                     },
-                    "bearerAuth": {
+                    "initError": {
                         "type": "string",
-                        "writeOnly": true
-                    },
-                    "contentLanguage": {
-                        "type": "string"
-                    },
-                    "expires": {
-                        "type": "integer",
-                        "format": "int64"
-                    },
-                    "ifMatch": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "ifNoneMatch": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "ifUnmodifiedSince": {
-                        "type": "integer",
-                        "format": "int64"
-                    },
-                    "pragma": {
-                        "type": "string"
-                    },
-                    "upgrade": {
-                        "type": "string"
-                    },
-                    "vary": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "contentType": {
-                        "$ref": "#/components/schemas/MediaType"
-                    },
-                    "ifModifiedSince": {
-                        "type": "integer",
-                        "format": "int64"
+                        "description": "Nur gesetzt, wenn die Initialisierung fehlgeschlagen ist"
                     }
                 }
             },
-            "HttpRange": {},
-            "MediaType": {
+            "ReachableService": {
                 "type": "object",
+                "description": "Über den Envoy-Sidecar erreichbarer Outbound-Service",
                 "properties": {
-                    "type": {
+                    "host": {
+                        "type": "string",
+                        "example": "my-service.default.svc.cluster.local"
+                    },
+                    "port": {
+                        "type": "integer",
+                        "format": "int32",
+                        "example": 8080
+                    },
+                    "shortName": {
+                        "type": "string",
+                        "example": "my-service"
+                    },
+                    "subset": {
+                        "type": "string",
+                        "description": "Nur gesetzt, wenn der Cluster ein Subset hat"
+                    }
+                }
+            },
+            "ErrorResponse": {
+                "type": "object",
+                "description": "Fehlerantwort",
+                "properties": {
+                    "error": {
+                        "type": "string"
+                    }
+                }
+            },
+            "Diagnosis": {
+                "type": "object",
+                "description": "Aus Envoy-Fehlermetriken abgeleitete Diagnose",
+                "properties": {
+                    "severity": {
+                        "type": "string",
+                        "enum": [
+                            "KRITISCH",
+                            "WARNUNG",
+                            "INFO"
+                        ]
+                    },
+                    "title": {
                         "type": "string"
                     },
-                    "subtype": {
+                    "description": {
                         "type": "string"
                     },
-                    "parameters": {
+                    "recommendation": {
+                        "type": "string"
+                    },
+                    "affectedMetrics": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "HealthDiagnostics": {
+                "type": "object",
+                "description": "Sektion B: Gesundheit & Fehler",
+                "properties": {
+                    "activeErrorMetrics": {
                         "type": "object",
                         "additionalProperties": {
                             "type": "string"
                         }
                     },
-                    "qualityValue": {
-                        "type": "number",
-                        "format": "double"
+                    "errorCount": {
+                        "type": "integer",
+                        "format": "int32"
                     },
-                    "concrete": {
-                        "type": "boolean"
+                    "diagnoses": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Diagnosis"
+                        }
+                    }
+                }
+            },
+            "Reachability": {
+                "type": "object",
+                "description": "Sektion A: Erreichbarkeit",
+                "properties": {
+                    "envoyConfig": {
+                        "description": "Geparster Envoy /config_dump oder ConfigDumpTruncated, wenn das Größenlimit überschritten ist"
                     },
-                    "wildcardType": {
-                        "type": "boolean"
+                    "activeEndpoints": {
+                        "type": "string",
+                        "description": "Rohausgabe von /clusters"
                     },
-                    "wildcardSubtype": {
-                        "type": "boolean"
+                    "summary": {
+                        "type": "string"
+                    }
+                }
+            },
+            "SidecarReport": {
+                "type": "object",
+                "description": "Vollständiger Istio-Sidecar-Report",
+                "properties": {
+                    "reachability": {
+                        "$ref": "#/components/schemas/Reachability"
                     },
-                    "subtypeSuffix": {
+                    "healthDiagnostics": {
+                        "$ref": "#/components/schemas/HealthDiagnostics"
+                    },
+                    "timestamp": {
                         "type": "string"
                     },
-                    "charset": {
+                    "error": {
                         "type": "string"
+                    }
+                }
+            },
+            "AuthorizationAnalysis": {
+                "type": "object",
+                "description": "Bewertung der AuthorizationPolicies im Ziel-Namespace",
+                "properties": {
+                    "matchingPolicies": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PolicyMatch"
+                        }
+                    },
+                    "verdict": {
+                        "type": "string"
+                    }
+                }
+            },
+            "DestinationRuleMatch": {
+                "type": "object",
+                "description": "Analyse einer DestinationRule gegen den Host",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "hostMatch": {
+                        "type": "boolean"
+                    },
+                    "drHost": {
+                        "type": "string"
+                    },
+                    "trafficPolicy": {
+                        "description": "Rohdaten aus spec.trafficPolicy"
+                    },
+                    "subsets": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Subset"
+                        }
+                    },
+                    "namespace": {
+                        "type": "string"
+                    }
+                }
+            },
+            "HttpRouteAnalysis": {
+                "type": "object",
+                "description": "Analyse einer HTTP-Route eines VirtualService",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "pathMatch": {
+                        "type": "boolean"
+                    },
+                    "matchReason": {
+                        "type": "string"
+                    },
+                    "destinations": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/RouteDestination"
+                        }
+                    },
+                    "timeout": {
+                        "type": "string"
+                    },
+                    "retries": {
+                        "description": "Rohdaten aus spec.http[].retries"
+                    },
+                    "faultInjection": {
+                        "description": "Rohdaten aus spec.http[].fault"
+                    }
+                }
+            },
+            "PeerAuthenticationMatch": {
+                "type": "object",
+                "description": "PeerAuthentication, deren Selector auf den Ziel-Workload passt",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "mtlsMode": {
+                        "type": "string"
+                    }
+                }
+            },
+            "PolicyMatch": {
+                "type": "object",
+                "description": "AuthorizationPolicy, deren Selector auf den Ziel-Workload passt",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "action": {
+                        "type": "string"
+                    },
+                    "appliesToSource": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "RouteDestination": {
+                "type": "object",
+                "description": "Routing-Ziel einer HTTP-Route",
+                "properties": {
+                    "host": {
+                        "type": "string"
+                    },
+                    "subset": {
+                        "type": "string"
+                    },
+                    "port": {
+                        "description": "Rohdaten aus destination.port"
+                    },
+                    "weight": {
+                        "type": "integer",
+                        "format": "int32"
+                    }
+                }
+            },
+            "ServiceEntryMatch": {
+                "type": "object",
+                "description": "Analyse eines ServiceEntry gegen Host und Port",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "hostMatch": {
+                        "type": "boolean"
+                    },
+                    "seHosts": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "location": {
+                        "type": "string"
+                    },
+                    "resolution": {
+                        "type": "string"
+                    },
+                    "ports": {
+                        "description": "Rohdaten aus spec.ports"
+                    },
+                    "portMatch": {
+                        "type": "boolean"
+                    },
+                    "portMatchWarning": {
+                        "type": "string"
+                    },
+                    "endpoints": {
+                        "description": "Rohdaten aus spec.endpoints"
+                    },
+                    "subjectAltNames": {
+                        "description": "Rohdaten aus spec.subjectAltNames"
+                    },
+                    "namespace": {
+                        "type": "string"
+                    }
+                }
+            },
+            "SidecarEgress": {
+                "type": "object",
+                "description": "Egress-Scoping durch Sidecar-Resources im Source-Namespace",
+                "properties": {
+                    "restricted": {
+                        "type": "boolean"
+                    },
+                    "info": {
+                        "type": "string"
+                    },
+                    "hostAllowed": {
+                        "type": "boolean"
+                    },
+                    "checkedEgressHosts": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "warning": {
+                        "type": "string"
+                    }
+                }
+            },
+            "Subset": {
+                "type": "object",
+                "description": "Subset einer DestinationRule",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "labels": {
+                        "description": "Rohdaten aus subsets[].labels"
+                    },
+                    "trafficPolicy": {
+                        "description": "Rohdaten aus subsets[].trafficPolicy"
+                    }
+                }
+            },
+            "UrlCorrelation": {
+                "type": "object",
+                "description": "Ergebnis der Korrelation einer URL mit der Istio-Konfiguration",
+                "properties": {
+                    "requestedHost": {
+                        "type": "string"
+                    },
+                    "requestedPath": {
+                        "type": "string"
+                    },
+                    "sourceNamespace": {
+                        "type": "string"
+                    },
+                    "targetNamespace": {
+                        "type": "string"
+                    },
+                    "queriedNamespaces": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "matchedVirtualServices": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/VirtualServiceMatch"
+                        }
+                    },
+                    "matchedDestinationRules": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DestinationRuleMatch"
+                        }
+                    },
+                    "matchedServiceEntries": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ServiceEntryMatch"
+                        }
+                    },
+                    "authorizationPolicies": {
+                        "$ref": "#/components/schemas/AuthorizationAnalysis"
+                    },
+                    "peerAuthentications": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PeerAuthenticationMatch"
+                        }
+                    },
+                    "sidecarEgress": {
+                        "$ref": "#/components/schemas/SidecarEgress"
+                    },
+                    "hasMatch": {
+                        "type": "boolean"
+                    },
+                    "error": {
+                        "type": "string"
+                    }
+                }
+            },
+            "VirtualServiceMatch": {
+                "type": "object",
+                "description": "Analyse eines VirtualService gegen Host und Pfad",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "hostMatch": {
+                        "type": "boolean"
+                    },
+                    "vsHosts": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "noHttpRoutes": {
+                        "type": "boolean"
+                    },
+                    "httpRoutes": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/HttpRouteAnalysis"
+                        }
+                    },
+                    "pathMatch": {
+                        "type": "boolean"
+                    },
+                    "namespace": {
+                        "type": "string"
+                    }
+                }
+            },
+            "EnvoyDetails": {
+                "type": "object",
+                "description": "Kurzinfo aus der Envoy Admin API",
+                "properties": {
+                    "info": {
+                        "type": "object",
+                        "additionalProperties": {},
+                        "description": "Rohdaten von /server_info"
+                    },
+                    "clusterSummary": {
+                        "type": "string"
+                    },
+                    "networkStats": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
+                    },
+                    "error": {
+                        "type": "string"
+                    }
+                }
+            },
+            "K8sContext": {
+                "type": "object",
+                "description": "Pod-Kontext für die Navbar",
+                "properties": {
+                    "podName": {
+                        "type": "string"
+                    },
+                    "namespace": {
+                        "type": "string"
+                    },
+                    "istioSidecar": {
+                        "type": "boolean"
+                    },
+                    "istioDetails": {
+                        "$ref": "#/components/schemas/EnvoyDetails",
+                        "description": "Nur gesetzt, wenn ein Istio-Sidecar aktiv ist"
                     }
                 }
             }
