@@ -35,6 +35,10 @@ public class ClientService {
 	private static final Set<String> BAD_HEADERS = Set.of(
 			"host", "content-length", "connection", "accept-encoding", "upgrade"
 	);
+	// RFC 9110 7.6.1: gelten nur für eine Verbindung und dürfen nicht weitergereicht werden
+	private static final Set<String> HOP_BY_HOP_HEADERS = Set.of(
+			"connection", "keep-alive", "proxy-connection", "transfer-encoding", "te", "trailer", "upgrade"
+	);
 	private static final Set<String> IDEMPOTENT_METHODS = Set.of(
 			"GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELETE"
 	);
@@ -78,6 +82,8 @@ public class ClientService {
 			visitedUris.add(currentUri);
 			String currentMethod = requestData.method().name();
 			String currentBody = requestData.body();
+			// Wird auch bei 307/308 gebraucht, wenn requestData nicht mehr übergeben wird
+			String contentType = effectiveContentType(requestData);
 
 			// DNS-Auflösung vor dem Request (diagnostisch)
 			String resolvedIps = resolveDns(currentUri.getHost());
@@ -87,7 +93,7 @@ public class ClientService {
 			RequestResult initial;
 			try {
 				HttpResponse<LimitedBody> h2response = client.send(
-						buildRequest(currentUri, currentMethod, currentBody, requestData, incomingHeaders),
+						buildRequest(currentUri, currentMethod, currentBody, contentType, requestData, incomingHeaders),
 						bodyHandler);
 				// 502 mit Envoy-Protokollfehler → HTTP/2 wird vom Upstream nicht unterstützt
 				boolean isProtocolError = h2response.statusCode() == 502
@@ -95,7 +101,7 @@ public class ClientService {
 				if (isProtocolError) {
 					logger.warn("HTTP/2 502 protocol error, Fallback auf HTTP/1.1");
 					initial = new RequestResult(clientHttp11,
-							clientHttp11.send(buildRequest(currentUri, currentMethod, currentBody, requestData, incomingHeaders),
+							clientHttp11.send(buildRequest(currentUri, currentMethod, currentBody, contentType, requestData, incomingHeaders),
 									bodyHandler),
 							true);
 				} else {
@@ -108,7 +114,7 @@ public class ClientService {
 				}
 				logger.warn("HTTP/2 Verbindungsfehler ({}), Fallback auf HTTP/1.1", e.getMessage());
 				initial = new RequestResult(clientHttp11,
-						clientHttp11.send(buildRequest(currentUri, currentMethod, currentBody, requestData, incomingHeaders),
+						clientHttp11.send(buildRequest(currentUri, currentMethod, currentBody, contentType, requestData, incomingHeaders),
 								bodyHandler),
 						true);
 			}
@@ -140,18 +146,14 @@ public class ClientService {
 
 				// Folge-Requests ohne originale Browser-Header (kein Auth-Leak)
 				response = activeClient.send(
-						buildRequest(currentUri, currentMethod, currentBody, null, null),
+						buildRequest(currentUri, currentMethod, currentBody, contentType, null, null),
 						bodyHandler);
 			}
 
-			HttpHeaders responseHeaders = new HttpHeaders();
-			response.headers().map().forEach(responseHeaders::addAll);
+			HttpHeaders responseHeaders = filterResponseHeaders(response.headers());
 			String protocolVersion = response.version() == Version.HTTP_2 ? "HTTP/2" : "HTTP/1.1";
 			boolean truncated = response.body().truncated();
 			if (truncated) {
-				// Upstream-Länge passt nicht mehr zum gekürzten Body
-				responseHeaders.remove(HttpHeaders.CONTENT_LENGTH);
-				responseHeaders.remove(HttpHeaders.TRANSFER_ENCODING);
 				logger.warn("Response von {} größer als {}, Body wurde gekürzt", currentUri, maxBodySize);
 			}
 
@@ -199,7 +201,46 @@ public class ClientService {
 				|| e instanceof javax.net.ssl.SSLHandshakeException;
 	}
 
-	private HttpRequest buildRequest(URI uri, String method, String body,
+	/**
+	 * Entfernt Hop-by-Hop-Header (inkl. der im Connection-Header genannten) und Content-Length.
+	 * Der Body wird als String dekodiert und von Spring neu kodiert, die Upstream-Länge stimmt
+	 * daher bei gekürzten, binären oder nicht UTF-8-kodierten Bodies nicht mehr.
+	 */
+	private HttpHeaders filterResponseHeaders(java.net.http.HttpHeaders upstreamHeaders) {
+		Set<String> dropped = new HashSet<>(HOP_BY_HOP_HEADERS);
+		dropped.add("content-length");
+		upstreamHeaders.allValues("connection").stream()
+				.flatMap(value -> java.util.Arrays.stream(value.split(",")))
+				.map(token -> token.trim().toLowerCase())
+				.filter(token -> !token.isEmpty())
+				.forEach(dropped::add);
+
+		HttpHeaders responseHeaders = new HttpHeaders();
+		upstreamHeaders.map().forEach((key, values) -> {
+			if (!dropped.contains(key.toLowerCase())) {
+				responseHeaders.addAll(key, values);
+			}
+		});
+		return responseHeaders;
+	}
+
+	/**
+	 * Content-Type des weitergeleiteten Bodys: Custom-Header vor contentType-Feld vor JSON-Default.
+	 */
+	private String effectiveContentType(JavaHttpRequest requestData) {
+		if (requestData.customHeaders() != null) {
+			for (var entry : requestData.customHeaders().entrySet()) {
+				if ("content-type".equalsIgnoreCase(entry.getKey())
+						&& entry.getValue() != null && !entry.getValue().isBlank()) {
+					return entry.getValue();
+				}
+			}
+		}
+		String ct = requestData.contentType();
+		return ct != null && !ct.isBlank() ? ct : "application/json";
+	}
+
+	private HttpRequest buildRequest(URI uri, String method, String body, String contentType,
 			JavaHttpRequest requestData, HttpHeaders incomingHeaders) {
 
 		boolean hasBody = body != null && !body.isBlank()
@@ -214,9 +255,8 @@ public class ClientService {
 				.timeout(Duration.ofSeconds(30))
 				.method(method, bodyPublisher);
 
-		if (hasBody && requestData != null) {
-			String ct = requestData.contentType();
-			builder.header("Content-Type", ct != null && !ct.isBlank() ? ct : "application/json");
+		if (hasBody) {
+			builder.header("Content-Type", contentType);
 		}
 
 		if (requestData != null && requestData.copyHeaders() && incomingHeaders != null) {

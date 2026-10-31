@@ -140,6 +140,30 @@ class ClientServiceTest {
             exchange.getResponseBody().close();
         });
 
+        // Hop-by-Hop-Header, darunter ein per Connection-Header deklarierter
+        server.createContext("/hop-by-hop", exchange -> {
+            exchange.getResponseHeaders().set("Connection", "X-Hop-Custom");
+            exchange.getResponseHeaders().set("X-Hop-Custom", "secret");
+            exchange.getResponseHeaders().set("Keep-Alive", "timeout=5");
+            exchange.getResponseHeaders().set("X-End-To-End", "kept");
+            byte[] response = "hop".getBytes();
+            // Länge 0 → chunked Transfer-Encoding
+            exchange.sendResponseHeaders(200, 0);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(response);
+            }
+        });
+
+        // Binärer Body, der sich nicht verlustfrei als UTF-8 dekodieren lässt
+        server.createContext("/binary", exchange -> {
+            byte[] response = {(byte) 0xFF, (byte) 0xFE, (byte) 0x80, 0x00, (byte) 0xC3};
+            exchange.getResponseHeaders().set("Content-Type", "application/octet-stream");
+            exchange.sendResponseHeaders(200, response.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(response);
+            }
+        });
+
         server.start();
     }
 
@@ -592,6 +616,44 @@ class ClientServiceTest {
     }
 
     @Test
+    void sendRequest_with307Redirect_keepsContentType() {
+        JavaHttpRequest request = new JavaHttpRequest(
+                baseUrl() + "/redirect/307",
+                HttpMethod.POST,
+                "<a/>",
+                "application/xml",
+                false,
+                null
+        );
+
+        ResponseEntity<String> response = clientService.sendRequest(request, new HttpHeaders());
+
+        assertEquals(200, response.getStatusCode().value());
+        assertTrue(response.getBody().contains("Content-Type: application/xml"),
+                "307 redirect must preserve the Content-Type, got: " + response.getBody());
+    }
+
+    @Test
+    void sendRequest_with308Redirect_keepsContentTypeFromCustomHeader() {
+        JavaHttpRequest request = new JavaHttpRequest(
+                baseUrl() + "/redirect/308",
+                HttpMethod.PUT,
+                "a=b",
+                null,
+                false,
+                Map.of("content-type", "application/x-www-form-urlencoded")
+        );
+
+        ResponseEntity<String> response = clientService.sendRequest(request, new HttpHeaders());
+
+        assertEquals(200, response.getStatusCode().value());
+        assertTrue(response.getBody().contains("Received: a=b"),
+                "308 redirect must preserve the body, got: " + response.getBody());
+        assertTrue(response.getBody().contains("Content-Type: application/x-www-form-urlencoded"),
+                "308 redirect must preserve the custom Content-Type, got: " + response.getBody());
+    }
+
+    @Test
     void sendRequest_withRedirectChain_capturesAllHops() {
         // /redirect/chain → 301 → /redirect/302 → 302 → /get (2 hops total)
         JavaHttpRequest request = new JavaHttpRequest(
@@ -753,6 +815,48 @@ class ClientServiceTest {
             assertEquals(502, response.getStatusCode().value());
             assertTrue(requestCount.get() >= 2, "GET muss per HTTP/1.1-Fallback wiederholt werden");
         }
+    }
+
+    @Test
+    void sendRequest_stripsHopByHopResponseHeaders() {
+        JavaHttpRequest request = new JavaHttpRequest(
+                baseUrl() + "/hop-by-hop",
+                HttpMethod.GET,
+                null,
+                null,
+                false,
+                null
+        );
+
+        ResponseEntity<String> response = clientService.sendRequest(request, new HttpHeaders());
+
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals("hop", response.getBody());
+        HttpHeaders headers = response.getHeaders();
+        assertNull(headers.getFirst(HttpHeaders.CONNECTION));
+        assertNull(headers.getFirst(HttpHeaders.TRANSFER_ENCODING));
+        assertNull(headers.getFirst("Keep-Alive"));
+        assertNull(headers.getFirst("X-Hop-Custom"), "Im Connection-Header genannte Header sind hop-by-hop");
+        assertEquals("kept", headers.getFirst("X-End-To-End"));
+    }
+
+    @Test
+    void sendRequest_withBinaryBody_dropsUpstreamContentLength() {
+        JavaHttpRequest request = new JavaHttpRequest(
+                baseUrl() + "/binary",
+                HttpMethod.GET,
+                null,
+                null,
+                false,
+                null
+        );
+
+        ResponseEntity<String> response = clientService.sendRequest(request, new HttpHeaders());
+
+        assertEquals(200, response.getStatusCode().value());
+        assertNull(response.getHeaders().getFirst(HttpHeaders.CONTENT_LENGTH),
+                "Upstream-Content-Length passt nicht zum neu kodierten String-Body");
+        assertEquals("application/octet-stream", response.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE));
     }
 
     @Test
