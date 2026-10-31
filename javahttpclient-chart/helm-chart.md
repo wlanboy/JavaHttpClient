@@ -17,6 +17,13 @@ trotz der `sidecar.istio.io/inject`-Annotation im Deployment nicht injiziert, da
 per `namespaceSelector` auf `istio-injection=enabled` filtert:
 
 ```bash
+bash namespaces.sh
+```
+
+Das Skript legt standardmäßig den Namespace `clients` an und ist idempotent. Weitere Namespaces
+können als Argumente übergeben werden (`bash namespaces.sh clients demo`). Manuell entspricht das:
+
+```bash
 kubectl create namespace clients
 kubectl label namespace clients istio-injection=enabled
 ```
