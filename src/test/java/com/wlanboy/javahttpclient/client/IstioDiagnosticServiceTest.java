@@ -3,6 +3,7 @@ package com.wlanboy.javahttpclient.client;
 import com.wlanboy.javahttpclient.client.dto.K8sContext;
 import com.wlanboy.javahttpclient.client.dto.SidecarReport;
 import com.wlanboy.javahttpclient.client.dto.SidecarReport.Diagnosis;
+import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.AuthorizationAnalysis;
 import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.HttpRouteAnalysis;
 import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.RouteDestination;
 import com.wlanboy.javahttpclient.client.dto.UrlCorrelation.ServiceEntryMatch;
@@ -846,8 +847,15 @@ class IstioDiagnosticServiceTest {
     }
 
     @Test
-    void ruleMatchesSourceNamespace_withNoRules_appliesToAllSources() throws Exception {
+    void ruleMatchesSourceNamespace_withNoRules_neverMatches() throws Exception {
         Map<String, Object> spec = Map.of("action", "DENY");
+
+        assertFalse(invokeRuleMatchesSourceNamespace(spec, "clients"));
+    }
+
+    @Test
+    void ruleMatchesSourceNamespace_withEmptyRule_appliesToAllSources() throws Exception {
+        Map<String, Object> spec = Map.of("rules", List.of(Map.of()));
 
         assertTrue(invokeRuleMatchesSourceNamespace(spec, "clients"));
     }
@@ -937,5 +945,88 @@ class IstioDiagnosticServiceTest {
         assertFalse(egress.restricted());
         assertNull(egress.hostAllowed());
         assertNull(egress.warning());
+    }
+
+    // =========================================================================
+    // analyzeAuthorizationPolicies tests
+    // =========================================================================
+
+    private AuthorizationAnalysis analyzeWithPolicies(List<Object> policies) throws Exception {
+        IstioDiagnosticService stubbed = new IstioDiagnosticService(K8sClientServiceTest.withoutCluster(),
+                DataSize.ofMegabytes(5), "http://127.0.0.1:15000", CLOSED_PORT) {
+            @Override
+            public List<Object> getIstioResources(String namespace, String type) {
+                return "authorizationpolicies".equals(type) ? policies : List.of();
+            }
+        };
+        Method method = IstioDiagnosticService.class.getDeclaredMethod(
+                "analyzeAuthorizationPolicies", String.class, String.class, String.class);
+        method.setAccessible(true);
+        return (AuthorizationAnalysis) method.invoke(stubbed, "demo", "demo-app", "clients");
+    }
+
+    private static Map<String, Object> policy(String name, Map<String, Object> spec) {
+        return Map.of("metadata", Map.of("name", name), "spec", spec);
+    }
+
+    private static Map<String, Object> rulesFromNamespace(String action, String namespace) {
+        return Map.of("action", action, "rules", List.of(Map.of(
+                "from", List.of(Map.of("source", Map.of("namespaces", List.of(namespace)))))));
+    }
+
+    @Test
+    void analyzeAuthorizationPolicies_allowWithEmptySpec_blocksEverything() throws Exception {
+        AuthorizationAnalysis result = analyzeWithPolicies(List.of(policy("allow-nothing", Map.of())));
+
+        assertTrue(result.verdict().startsWith("BLOCKED"), result.verdict());
+        assertFalse(result.matchingPolicies().getFirst().appliesToSource());
+    }
+
+    @Test
+    void analyzeAuthorizationPolicies_denyWithoutRules_blocksNothing() throws Exception {
+        AuthorizationAnalysis result = analyzeWithPolicies(List.of(policy("deny-nothing", Map.of("action", "DENY"))));
+
+        assertTrue(result.verdict().startsWith("ALLOWED"), result.verdict());
+    }
+
+    @Test
+    void analyzeAuthorizationPolicies_allowWithEmptyRule_allowsEverything() throws Exception {
+        AuthorizationAnalysis result = analyzeWithPolicies(List.of(
+                policy("allow-all", Map.of("rules", List.of(Map.of())))));
+
+        assertTrue(result.verdict().startsWith("ALLOWED"), result.verdict());
+    }
+
+    @Test
+    void analyzeAuthorizationPolicies_auditPolicy_doesNotTriggerDenyByDefault() throws Exception {
+        AuthorizationAnalysis result = analyzeWithPolicies(List.of(
+                policy("audit-other", rulesFromNamespace("AUDIT", "other"))));
+
+        assertTrue(result.verdict().startsWith("ALLOWED"), result.verdict());
+    }
+
+    @Test
+    void analyzeAuthorizationPolicies_customPolicyForOtherNamespace_doesNotTriggerDenyByDefault() throws Exception {
+        AuthorizationAnalysis result = analyzeWithPolicies(List.of(
+                policy("ext-authz-other", rulesFromNamespace("CUSTOM", "other"))));
+
+        assertTrue(result.verdict().startsWith("ALLOWED"), result.verdict());
+    }
+
+    @Test
+    void analyzeAuthorizationPolicies_customPolicyForSource_isUnknown() throws Exception {
+        AuthorizationAnalysis result = analyzeWithPolicies(List.of(
+                policy("ext-authz", rulesFromNamespace("CUSTOM", "clients"))));
+
+        assertTrue(result.verdict().startsWith("UNKNOWN"), result.verdict());
+    }
+
+    @Test
+    void analyzeAuthorizationPolicies_denyForSource_winsOverAllow() throws Exception {
+        AuthorizationAnalysis result = analyzeWithPolicies(List.of(
+                policy("allow-clients", rulesFromNamespace("ALLOW", "clients")),
+                policy("deny-clients", rulesFromNamespace("DENY", "clients"))));
+
+        assertTrue(result.verdict().startsWith("BLOCKED – DENY"), result.verdict());
     }
 }

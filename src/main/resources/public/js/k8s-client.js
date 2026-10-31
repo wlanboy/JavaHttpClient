@@ -457,11 +457,12 @@ const K8sClient = (() => {
         const subTitle = (text) => `<div class="section-title mb-1 divider">${text}</div>`;
 
         const authz = corr.authorizationPolicies;
-        const authzBlocked = authz && authz.verdict && authz.verdict.startsWith('BLOCKED');
+        const authzBadge = authz?.verdict?.startsWith('BLOCKED') ? 'badge-danger'
+            : authz?.verdict?.startsWith('UNKNOWN') ? 'badge-warning' : 'badge-success';
         const authzHtml = authz ? `
             ${subTitle('AuthorizationPolicies')}
             <div class="mb-2">
-                <span class="badge ${authzBlocked ? 'badge-danger' : 'badge-success'}">${escapeHtml(authz.verdict)}</span>
+                <span class="badge ${authzBadge}">${escapeHtml(authz.verdict)}</span>
                 ${(authz.matchingPolicies ?? []).map(p => `
                     <div class="x-small mt-1">${escapeHtml(p.name)}
                         <span class="badge ${p.action === 'DENY' ? 'badge-danger' : 'badge-secondary'} ms-1">${escapeHtml(p.action)}</span>

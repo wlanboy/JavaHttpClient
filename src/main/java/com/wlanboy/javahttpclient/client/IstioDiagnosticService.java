@@ -291,12 +291,14 @@ public class IstioDiagnosticService {
      * Prüft AuthorizationPolicies im Ziel-Namespace gegen den Selector (App-Kurzname) und
      * ermittelt, ob der Source-Namespace laut Policy blockiert wird (DENY) oder – bei
      * vorhandenen ALLOW-Policies für den Workload – nicht in der Allow-Liste steht.
+     * Auswertung wie in Istio: CUSTOM vor DENY vor ALLOW; AUDIT beeinflusst die Entscheidung nicht.
      */
     private AuthorizationAnalysis analyzeAuthorizationPolicies(String targetNamespace, String targetShortName, String sourceNamespace) {
         List<PolicyMatch> matchingPolicies = new ArrayList<>();
         boolean deniedBySpecificRule = false;
         boolean hasAllowPolicy = false;
         boolean allowedBySpecificRule = false;
+        boolean customAppliesToSource = false;
 
         for (Object obj : getIstioResources(targetNamespace, "authorizationpolicies")) {
             if (!(obj instanceof Map<?, ?> ap)) continue;
@@ -308,11 +310,20 @@ public class IstioDiagnosticService {
 
             matchingPolicies.add(new PolicyMatch(nameOf(ap), action, sourceMatches));
 
-            if ("DENY".equalsIgnoreCase(action)) {
-                if (sourceMatches) deniedBySpecificRule = true;
-            } else {
-                hasAllowPolicy = true;
-                if (sourceMatches) allowedBySpecificRule = true;
+            switch (action.toUpperCase()) {
+                case "DENY" -> {
+                    if (sourceMatches) deniedBySpecificRule = true;
+                }
+                case "ALLOW" -> {
+                    hasAllowPolicy = true;
+                    if (sourceMatches) allowedBySpecificRule = true;
+                }
+                case "CUSTOM" -> {
+                    if (sourceMatches) customAppliesToSource = true;
+                }
+                default -> {
+                    // AUDIT: nur Logging, keine Allow/Deny-Entscheidung
+                }
             }
         }
 
@@ -321,6 +332,8 @@ public class IstioDiagnosticService {
             verdict = "BLOCKED – DENY-Policy greift für Source-Namespace '" + sourceNamespace + "'";
         } else if (hasAllowPolicy && !allowedBySpecificRule) {
             verdict = "BLOCKED – ALLOW-Policies vorhanden, aber keine erlaubt Source-Namespace '" + sourceNamespace + "' (Deny-by-default)";
+        } else if (customAppliesToSource) {
+            verdict = "UNKNOWN – CUSTOM-Policy greift für Source-Namespace '" + sourceNamespace + "', Entscheidung liegt beim externen Authorizer";
         } else {
             verdict = "ALLOWED – keine blockierende AuthorizationPolicy gefunden";
         }
@@ -337,7 +350,8 @@ public class IstioDiagnosticService {
 
     private boolean ruleMatchesSourceNamespace(Map<?, ?> spec, String sourceNamespace) {
         List<?> rules = (List<?>) spec.get("rules");
-        if (rules == null || rules.isEmpty()) return true;
+        // Ohne Regeln matcht eine Policy nie (bei ALLOW also "allow nothing")
+        if (rules == null || rules.isEmpty()) return false;
         for (Object ruleObj : rules) {
             if (!(ruleObj instanceof Map<?, ?> rule)) continue;
             List<?> froms = (List<?>) rule.get("from");
