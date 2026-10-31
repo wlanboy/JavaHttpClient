@@ -199,6 +199,7 @@ Separater `SSLSocket`-basierter TLS-Probe (unabhängig vom Haupt-Request):
 
 **Tab B – Aktive Fehler-Metriken**
 
+- Tab-Reiter wird nur rot und zeigt einen Zähler (z. B. „B) Aktive Metriken 3“), wenn aktive Fehler-Metriken vorliegen
 - Ziel-URL-Korrelation: hebt Metriken hervor die den Hostnamen der URL enthalten
 - Diagnose-Karten (KRITISCH/WARNUNG/INFO) mit Beschreibung + Empfehlung + betroffene Metriken
 - Vollständige Metriken-Tabelle (alle Werte inkl. 0)

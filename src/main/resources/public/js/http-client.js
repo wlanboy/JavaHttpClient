@@ -69,6 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- INITIALISIERUNG ---
     loadHistoryFromStorage();
+    renderHistory();
     headerNameSuggestions.innerHTML = HEADER_SUGGESTIONS.map(name => `<option value="${escapeHtml(name)}"></option>`).join('');
     if (!loadFormFromStorage()) addHeaderRow('Content-Type', 'application/json');
     updateBodyState();
@@ -112,13 +113,30 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Statt confirm(): erster Klick fragt im Button nach, zweiter Klick löscht
+    const clearHistoryLabel = clearHistoryBtn.textContent;
+    let clearConfirmTimer = null;
+
+    function resetClearHistoryBtn() {
+        clearTimeout(clearConfirmTimer);
+        clearConfirmTimer = null;
+        clearHistoryBtn.classList.remove('is-confirming');
+        clearHistoryBtn.textContent = clearHistoryLabel;
+    }
+
     clearHistoryBtn.addEventListener('click', () => {
-        if (confirm("Möchtest du die gesamte Historie wirklich löschen?")) {
-            requestHistory = [];
-            saveHistoryToStorage();
-            renderHistory();
+        if (!clearConfirmTimer) {
+            clearHistoryBtn.classList.add('is-confirming');
+            clearHistoryBtn.textContent = 'Wirklich leeren?';
+            clearConfirmTimer = setTimeout(resetClearHistoryBtn, 4000);
+            return;
         }
+        resetClearHistoryBtn();
+        requestHistory = [];
+        saveHistoryToStorage();
+        renderHistory();
     });
+    clearHistoryBtn.addEventListener('blur', () => { if (clearConfirmTimer) resetClearHistoryBtn(); });
 
     exportHistoryBtn.addEventListener('click', exportHistoryToJson);
 
@@ -564,6 +582,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderHistory() {
         emptyHistoryMsg.style.display = requestHistory.length ? 'none' : 'block';
+        exportHistoryBtn.disabled = !requestHistory.length;
+        clearHistoryBtn.disabled = !requestHistory.length;
         historyList.innerHTML = '';
 
         const urls = [...new Set(requestHistory.map(entry => entry.payload.url))];
@@ -644,7 +664,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function exportHistoryToJson() {
-        if (!requestHistory.length) return alert("Historie ist leer!");
+        if (!requestHistory.length) return;
         const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(requestHistory, null, 2));
         const downloadAnchor = document.createElement('a');
         downloadAnchor.setAttribute("href", dataStr);
@@ -665,10 +685,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function loadHistoryFromStorage() {
         try {
             const saved = localStorage.getItem(STORAGE_KEY);
-            if (saved) {
-                requestHistory = JSON.parse(saved);
-                renderHistory();
-            }
+            if (saved) requestHistory = JSON.parse(saved);
         } catch (e) {
             console.error("Fehler beim Laden aus LocalStorage", e);
             requestHistory = [];

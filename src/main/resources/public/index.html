@@ -49,8 +49,10 @@
                             <div>
                                 <label class="label" for="url">Ziel-URL</label>
                                 <input type="text" id="url" class="input input-lg" list="urlHistory"
-                                    placeholder="http://service.namespace.svc.cluster.local:8080/api/v1" required>
+                                    placeholder="http://service.namespace.svc.cluster.local:8080/api/v1" required
+                                    aria-describedby="urlHint">
                                 <datalist id="urlHistory"></datalist>
+                                <p id="urlHint" class="hint is-error" role="alert" hidden></p>
                             </div>
                         </div>
 
@@ -130,7 +132,7 @@
                     <div class="card-body">
                         <div class="tabs" id="diagTabs" role="tablist">
                             <button class="tab active" id="config-tab" data-target="tab-config" type="button" role="tab" aria-selected="true">A) Config & Erreichbarkeit</button>
-                            <button class="tab is-danger" id="errors-tab" data-target="tab-errors" type="button" role="tab" aria-selected="false">B) Aktive Metriken</button>
+                            <button class="tab" id="errors-tab" data-target="tab-errors" type="button" role="tab" aria-selected="false">B) Aktive Metriken <span id="errorsTabCount" class="badge badge-danger" hidden></span></button>
                             <button class="tab" id="resources-tab" data-target="tab-resources" type="button" role="tab" aria-selected="false">C) Pod Kontext</button>
                         </div>
 

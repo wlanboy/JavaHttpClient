@@ -67,10 +67,21 @@ const K8sClient = (() => {
         return isProblemMetric(key, value) ? 'bold text-danger' : 'muted';
     }
 
+    // Tab B nur rot und mit Zähler, wenn es tatsächlich aktive Fehler-Metriken gibt
+    function setErrorsTabCount(count) {
+        const tab = document.getElementById('errors-tab');
+        const badge = document.getElementById('errorsTabCount');
+        if (!tab || !badge) return;
+        tab.classList.toggle('is-danger', count > 0);
+        badge.textContent = count;
+        badge.hidden = !(count > 0);
+    }
+
     function renderTabB(healthDiagnostics, errorDiv, targetUrl = '') {
         const errorEntries = Object.entries(healthDiagnostics?.activeErrorMetrics ?? {});
         const errorCount = healthDiagnostics?.errorCount ?? errorEntries.length;
         const diagnoses = healthDiagnostics?.diagnoses ?? [];
+        setErrorsTabCount(errorEntries.length === 0 ? 0 : errorCount);
 
         // Hostname aus Ziel-URL extrahieren für Cluster-Korrelation
         let targetHostname = '';
@@ -514,6 +525,7 @@ const K8sClient = (() => {
 
             const spinner = '<div class="loading"><span class="spinner"></span></div>';
             [configDiv, errorDiv, resourceDiv].forEach(el => { if (el) el.innerHTML = spinner; });
+            setErrorsTabCount(0);
 
             try {
                 const targetUrl = document.getElementById('url')?.value ?? '';
@@ -590,6 +602,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     const refreshServicesBtn = document.getElementById('refreshServicesBtn');
     const diagTabs = document.querySelectorAll('#diagTabs .tab');
     const closeIstioBtn = document.getElementById('closeIstioBtn');
+    const urlInput = document.getElementById('url');
+    const urlHint = document.getElementById('urlHint');
+
+    function showUrlHint(text) {
+        urlInput.classList.add('is-invalid');
+        urlInput.setAttribute('aria-invalid', 'true');
+        urlHint.textContent = text;
+        urlHint.hidden = false;
+        urlInput.focus();
+    }
+
+    function clearUrlHint() {
+        urlInput.classList.remove('is-invalid');
+        urlInput.removeAttribute('aria-invalid');
+        urlHint.hidden = true;
+    }
+
+    urlInput.addEventListener('input', clearUrlHint);
 
     // Tab-Umschaltung im Istio-Panel
     diagTabs.forEach(tab => {
@@ -625,7 +655,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (serviceSelect) {
         serviceSelect.addEventListener('change', () => {
             if (serviceSelect.value) {
-                const urlInput = document.getElementById('url');
                 urlInput.value = withServiceOrigin(serviceSelect.value, urlInput.value);
                 urlInput.dispatchEvent(new Event('input', { bubbles: true }));
             }
@@ -638,8 +667,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (diagnoseBtn) {
         diagnoseBtn.addEventListener('click', () => {
-            const currentUrl = document.getElementById('url').value;
-            if (!currentUrl) return alert("Bitte URL eingeben.");
+            if (!urlInput.value.trim()) return showUrlHint('Bitte zuerst eine Ziel-URL eingeben.');
 
             document.getElementById('resultArea').style.display = 'block';
             document.getElementById('istioPanel').style.display = 'block';

@@ -280,6 +280,14 @@ select.input {
     max-width: 60ch;
 }
 
+.hint.is-error {
+    color: var(--danger);
+}
+
+.input.is-invalid {
+    border-color: var(--danger);
+}
+
 .header-row {
     display: grid;
     grid-template-columns: auto 5fr 6fr auto;
@@ -428,6 +436,12 @@ select.input {
 .btn-outline.is-success { --c: var(--success); }
 .btn-outline.is-danger  { --c: var(--danger); }
 .btn-outline.is-info    { --c: var(--info); }
+
+/* Zweiter Klick bestätigt (z. B. „Wirklich leeren?“) */
+.btn-outline.is-confirming {
+    background-color: var(--c);
+    color: #fff;
+}
 
 .btn-group {
     display: inline-flex;
@@ -623,6 +637,10 @@ select.input {
 
 .tab.is-danger {
     color: var(--danger);
+}
+
+.tab .badge {
+    margin-left: .25rem;
 }
 
 .tab.active {
