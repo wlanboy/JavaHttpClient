@@ -6,6 +6,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.util.unit.DataSize;
 
 import java.lang.reflect.Method;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,11 +16,19 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class IstioDiagnosticServiceTest {
 
+    // Port 1 ist privilegiert und in Testumgebungen nicht belegt
+    private static final int CLOSED_PORT = 1;
+
     private IstioDiagnosticService service;
+
+    private static IstioDiagnosticService newService(int sidecarStatusPort) {
+        return new IstioDiagnosticService(K8sClientServiceTest.withoutCluster(), DataSize.ofMegabytes(5),
+                "http://127.0.0.1:15000", sidecarStatusPort);
+    }
 
     @BeforeEach
     void setUp() {
-        service = new IstioDiagnosticService(K8sClientServiceTest.withoutCluster(), DataSize.ofMegabytes(5));
+        service = newService(CLOSED_PORT);
     }
 
     @Test
@@ -242,8 +252,25 @@ class IstioDiagnosticServiceTest {
     }
 
     @Test
+    void getContext_withReachableStatusPort_detectsSidecar() throws Exception {
+        try (ServerSocket statusPort = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
+            Map<String, Object> context = newService(statusPort.getLocalPort()).getContext();
+
+            assertEquals(true, context.get("istioSidecar"));
+        }
+    }
+
+    @Test
+    void getFullSidecarDetails_withClosedStatusPort_reportsConfiguredAddress() {
+        Map<String, Object> report = service.getFullSidecarDetails();
+
+        assertEquals("Istio Sidecar Proxy ist nicht aktiv (127.0.0.1:" + CLOSED_PORT + " nicht erreichbar).",
+                report.get("error"));
+    }
+
+    @Test
     void serviceInitialization_doesNotThrowException() {
-        assertDoesNotThrow(() -> new IstioDiagnosticService(K8sClientServiceTest.withoutCluster(), DataSize.ofMegabytes(5)));
+        assertDoesNotThrow(() -> newService(CLOSED_PORT));
     }
 
     @Test

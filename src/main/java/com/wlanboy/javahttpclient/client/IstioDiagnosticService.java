@@ -36,13 +36,20 @@ public class IstioDiagnosticService {
     private final K8sClientService k8sClientService;
     private final RestClient restClient;
     private final String envoyAdminUrl;
+    private final String sidecarStatusHost;
+    private final int sidecarStatusPort;
     private final DataSize maxConfigDumpSize;
 
     public IstioDiagnosticService(K8sClientService k8sClientService,
-            @Value("${istio.envoy.config-dump.max-size:5MB}") DataSize maxConfigDumpSize) {
+            @Value("${istio.envoy.config-dump.max-size:5MB}") DataSize maxConfigDumpSize,
+            @Value("${istio.envoy.admin-url:${ENVOY_ADMIN_URL:http://127.0.0.1:15000}}") String envoyAdminUrl,
+            @Value("${istio.sidecar.status-port:15021}") int sidecarStatusPort) {
         this.k8sClientService = k8sClientService;
         this.maxConfigDumpSize = maxConfigDumpSize;
-        this.envoyAdminUrl = System.getenv().getOrDefault("ENVOY_ADMIN_URL", "http://127.0.0.1:15000");
+        this.envoyAdminUrl = envoyAdminUrl;
+        // Sidecar-Check auf demselben Host wie die Admin-API, damit beide denselben Proxy ansprechen
+        this.sidecarStatusHost = URI.create(envoyAdminUrl).getHost();
+        this.sidecarStatusPort = sidecarStatusPort;
         // Read-Timeout greift pro Socket-Read, also auch bei hängendem Body
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(ENVOY_CONNECT_TIMEOUT);
@@ -84,7 +91,8 @@ public class IstioDiagnosticService {
         Map<String, Object> report = new LinkedHashMap<>();
 
         if (!checkIstioSidecar()) {
-            report.put("error", "Istio Sidecar Proxy ist nicht aktiv (Port 15021 nicht erreichbar).");
+            report.put("error", "Istio Sidecar Proxy ist nicht aktiv (" + sidecarStatusHost + ":" + sidecarStatusPort
+                    + " nicht erreichbar).");
             return report;
         }
 
@@ -718,7 +726,7 @@ public class IstioDiagnosticService {
 
     private boolean checkIstioSidecar() {
         try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress("127.0.0.1", 15021), 200);
+            socket.connect(new InetSocketAddress(sidecarStatusHost, sidecarStatusPort), 200);
             return true;
         } catch (Exception e) {
             return false;
