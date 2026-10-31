@@ -58,6 +58,13 @@ Bei Änderungen an Chart oder Values ein Rolling-Update durchführen:
 helm upgrade httpclient . -n clients
 ```
 
+Ohne SSL/TLS (Release wurde mit `certManager.enabled=false` installiert). Das `--set` muss beim
+Upgrade erneut angegeben werden, sonst greift wieder der Default `true`:
+
+```bash
+helm upgrade httpclient . -n clients --set certManager.enabled=false
+```
+
 ## Deinstallation
 
 Chart und alle zugehörigen Kubernetes-Ressourcen entfernen:
