@@ -6,14 +6,24 @@ import org.junit.jupiter.api.Test;
 import com.wlanboy.javahttpclient.client.dto.TlsInspection;
 import com.wlanboy.javahttpclient.client.dto.TlsInspection.CertificateInfo;
 
+import javax.net.ssl.SNIHostName;
+import javax.net.ssl.SNIServerName;
 import javax.security.auth.x500.X500Principal;
+import java.io.IOException;
 import java.math.BigInteger;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -60,6 +70,51 @@ class TlsInspectorServiceTest {
     @Test
     void inspect_serviceInitialization_doesNotThrow() {
         assertDoesNotThrow(() -> new TlsInspectorService());
+    }
+
+    @Test
+    void serverNames_hostname_setsSni() {
+        List<SNIServerName> names = TlsInspectorService.serverNames("example.com");
+
+        assertEquals(List.of(new SNIHostName("example.com")), names);
+    }
+
+    @Test
+    void serverNames_ipv4Literal_setsNoSni() {
+        assertTrue(TlsInspectorService.serverNames("127.0.0.1").isEmpty());
+    }
+
+    @Test
+    void serverNames_ipv6Literal_setsNoSni() {
+        assertTrue(TlsInspectorService.serverNames("::1").isEmpty());
+        assertTrue(TlsInspectorService.serverNames("2001:db8::1").isEmpty());
+    }
+
+    @Test
+    void inspect_ipv6Url_sendsClientHello() throws Exception {
+        ServerSocket server;
+        try {
+            server = new ServerSocket(0, 1, InetAddress.getByName("::1"));
+        } catch (IOException e) {
+            assumeTrue(false, "IPv6-Loopback nicht verfügbar");
+            return;
+        }
+        try (server) {
+            CompletableFuture<Integer> received = CompletableFuture.supplyAsync(() -> {
+                try (Socket s = server.accept()) {
+                    s.setSoTimeout(5000);
+                    return s.getInputStream().read(new byte[512]);
+                } catch (IOException e) {
+                    return -1;
+                }
+            });
+
+            TlsInspection result = service.inspect("https://[::1]:" + server.getLocalPort() + "/");
+
+            assertEquals("::1", result.host());
+            // Vor dem Fix scheiterte new SNIHostName("[::1]") noch vor dem Handshake
+            assertTrue(received.get(10, TimeUnit.SECONDS) > 0, "Server muss einen ClientHello empfangen");
+        }
     }
 
     @Test

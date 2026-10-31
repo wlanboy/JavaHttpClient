@@ -20,6 +20,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 
 @Service
 public class TlsInspectorService {
@@ -27,6 +28,7 @@ public class TlsInspectorService {
     private static final Logger logger = LoggerFactory.getLogger(TlsInspectorService.class);
     private static final int CONNECT_TIMEOUT_MS = 5000;
     private static final int READ_TIMEOUT_MS = 5000;
+    private static final Pattern IPV4 = Pattern.compile("\\d{1,3}(\\.\\d{1,3}){3}");
     private static final DateTimeFormatter ISO = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneOffset.UTC);
 
     public TlsInspection inspect(String url) {
@@ -39,6 +41,10 @@ public class TlsInspectorService {
             }
 
             host = uri.getHost();
+            // IPv6-Literale liefert URI mit Klammern ("[::1]")
+            if (host != null && host.startsWith("[") && host.endsWith("]")) {
+                host = host.substring(1, host.length() - 1);
+            }
             port = uri.getPort() != -1 ? uri.getPort() : 443;
 
             AtomicReference<X509Certificate[]> chainRef = new AtomicReference<>();
@@ -62,9 +68,9 @@ public class TlsInspectorService {
             try (Socket raw = connect(host, port);
                  SSLSocket socket = (SSLSocket) factory.createSocket(raw, host, port, true)) {
 
-                // SNI setzen
+                // SNI setzen (bei IP-Literalen leer, dann wird kein SNI gesendet)
                 SSLParameters params = socket.getSSLParameters();
-                params.setServerNames(List.of(new SNIHostName(host)));
+                params.setServerNames(serverNames(host));
                 socket.setSSLParameters(params);
 
                 SSLSession session = socket.getSession(); // löst Handshake aus
@@ -86,6 +92,18 @@ public class TlsInspectorService {
             logger.warn("TLS-Inspektion fehlgeschlagen für {}: {}", url, e.getMessage());
             return TlsInspection.error(host, port, e.getMessage());
         }
+    }
+
+    // RFC 6066: SNI darf keine IP-Adressen enthalten
+    static List<SNIServerName> serverNames(String host) {
+        if (isIpLiteral(host)) {
+            return List.of();
+        }
+        return List.of(new SNIHostName(host));
+    }
+
+    private static boolean isIpLiteral(String host) {
+        return host.indexOf(':') >= 0 || IPV4.matcher(host).matches();
     }
 
     private Socket connect(String host, int port) throws IOException {
